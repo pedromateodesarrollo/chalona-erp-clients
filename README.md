@@ -51,6 +51,7 @@ data.
 |---|---|
 | [`fox/`](fox/) | Cliente Visual FoxPro — para ERPs legados que ya corren en VFP |
 | [`dart-driver/`](dart-driver/) | Cliente Dart — para apps modernas (Flutter / Dart server / CLI) |
+| [`csharp/`](csharp/) | Cliente C# / .NET — Roslyn + AssemblyLoadContext, hot-swap real con `Unload()` |
 | [`sql/`](sql/) | Schema Postgres standalone (tablas + funciones) |
 | [`docs/`](docs/) | Arquitectura, quickstarts, limitaciones |
 
@@ -83,6 +84,17 @@ cd dart-driver
 dart pub get
 PG_HOST=localhost PG_DB=midb ./publicar.sh
 dart run bin/poc_postgres.dart
+```
+
+### 4. Cliente C#
+
+Ver [docs/csharp-quickstart.md](docs/csharp-quickstart.md).
+
+```bash
+cd csharp
+dotnet build
+PG_HOST=localhost PG_DB=midb ./publicar.sh
+dotnet run --project src/ChalonaCsDriver.Cli
 ```
 
 ## Arquitectura
@@ -147,6 +159,7 @@ No polling. No push notifications. No installers. Logic ships with data.
 |---|---|
 | `fox/` | Visual FoxPro client — for legacy ERPs already on VFP |
 | `dart-driver/` | Dart client — for modern apps (Flutter / Dart server / CLI) |
+| `csharp/` | C# / .NET client — Roslyn + AssemblyLoadContext, real `Unload()` hot-swap |
 | `sql/` | Standalone Postgres schema (tables + functions) |
 | `docs/` | Architecture, quickstarts, limitations |
 
@@ -163,6 +176,11 @@ cd fox && PG_HOST=localhost PG_DB=mydb ./publicar.sh
 cd dart-driver && dart pub get
 PG_HOST=localhost PG_DB=mydb ./publicar.sh
 dart run bin/poc_postgres.dart
+
+# 4. Publish a driver (C#)
+cd csharp && dotnet build
+PG_HOST=localhost PG_DB=mydb ./publicar.sh
+dotnet run --project src/ChalonaCsDriver.Cli
 ```
 
 See [`docs/`](docs/) for details and trade-offs.

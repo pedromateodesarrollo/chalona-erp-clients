@@ -10,6 +10,14 @@ pubspec.lock
 *.fxp
 chalona-ecf-v*.prg
 
+# .NET
+bin/
+obj/
+*.dll
+*.pdb
+*.user
+.vs/
+
 # Editor
 .vscode/
 .idea/
