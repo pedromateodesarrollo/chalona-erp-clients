@@ -1,146 +1,198 @@
 # Quickstart — Cliente Fox (Visual FoxPro)
 
+## Audiencia
+
+Esta guía es para un **integrador** que quiere conectar su ERP en VFP con
+la facturación electrónica de Chalona. Tú no hospedas nada — Chalona ya
+corre el server-ecf y publica el motor. Tu ERP solo necesita el loader.
+
+Si querés hospedar tu propio motor (forkear el patrón hot-reload para tu
+producto), saltá al final: [Self-hosting (avanzado)](#self-hosting-avanzado).
+
 ## Pre-requisitos
 
-- Visual FoxPro 9 (cliente)
-- Acceso de red al server-ecf (HTTP)
-- Para publicar nuevas versiones del motor: Postgres con el [schema](../sql/schema.sql)
-  aplicado del lado del **servidor** + `psql` y `python3` en el PATH
+- Visual FoxPro 9 instalado en la máquina del cliente
+- Acceso de red al server-ecf (`https://ecf-service.vicortiz.com/` por defecto)
+- Credenciales DGII (RNC, usuario, clave del portal de Chalona)
+
+**No necesitás Postgres.** El motor vive en la BD de Chalona; tu ERP solo
+hace HTTP contra el server-ecf.
 
 ## Concepto
 
-A diferencia de los clientes Dart/C#/TypeScript/Python (que se conectan a
-Postgres directo), el cliente Fox usa una arquitectura HTTP:
-
 ```
-[VFP cliente]  --HTTP-->  [server-ecf (Dart)]  --SQL-->  [Postgres]
+[VFP cliente]  --HTTP-->  [server-ecf (Dart)]  --SQL-->  [Postgres Chalona]
 chalona-ecf-loader.prg   ecf-service.vicortiz.com    data.fox_cliente_script
 ```
 
-El cliente Fox tiene dos archivos:
+Solo un archivo vive en el ERP del cliente:
 
 | Archivo | Qué hace |
 |---|---|
-| `chalona-ecf-loader.prg` | Mini-loader estático en VFP. Pregunta al server-ecf por HTTP por la versión activa, baja el `.prg` si cambió, lo compila a `.fxp` único, hace `SET PROCEDURE`. |
-| `chalona-ecf.prg` | Motor (cuerpo principal). Se descarga del server-ecf y se actualiza en caliente. Incluye lógica SQL Server por defecto + capa de cursores para ERPs distintos. |
+| `chalona-ecf-loader.prg` | Mini-loader estático. La primera llamada (y cada vez que hay versión nueva) hace `MSXML2.XMLHTTP` POST a `https://<servidor>/fox_cliente_script`, recibe el motor `chalona-ecf.prg` en JSON, lo compila a `.fxp` único, hace `SET PROCEDURE TO ... ADDITIVE`, instancia `goChalonaEcf`. |
 
-El loader es el único que vive estático en la instalación VFP. El motor se
-descarga al arrancar y se reemplaza cuando hay versión nueva.
+El motor (`chalona-ecf.prg`) **no** se distribuye con el cliente — se baja
+del server-ecf en cada arranque y se actualiza en caliente cuando Chalona
+publica una versión nueva.
 
-## 1. Aplicar schema
+## 1. Instalar el loader
 
-```bash
-psql -h localhost -U postgres -d midb -f ../sql/schema.sql
+Copia `chalona-ecf-loader.prg` desde este repo a la instalación VFP del
+cliente.
+
+## 2. Configurar (si tu ERP no usa `osis`)
+
+ERPs sobre Vicortiz tienen un objeto público `osis` con `servidor_ecf`,
+`usuario_sync`, `pass_sync`, `portal_dgii`, `dgii_multimoneda`. El loader
+los lee automáticamente.
+
+Si tu ERP no tiene `osis`, llamá `chalonaSetConfig(loCfg)` antes de la
+primera invocación:
+
+```foxpro
+LOCAL loCfg
+loCfg = CREATEOBJECT("Empty")
+ADDPROPERTY(loCfg, "servidor_ecf", "https://ecf-service.vicortiz.com/")
+ADDPROPERTY(loCfg, "usuario_sync", "tu_usuario@dominio.com")
+ADDPROPERTY(loCfg, "pass_sync",    "tu_clave")
+ADDPROPERTY(loCfg, "portal_dgii",  "testecf")  && testecf|ecf
+ADDPROPERTY(loCfg, "dgii_multimoneda", "T")    && opcional
+chalonaSetConfig(loCfg)
 ```
 
-## 2. Publicar la primera versión
+## 3. Usar
+
+```foxpro
+DO chalona-ecf-loader.prg
+
+* Enviar un comprobante por su control en dbo.imtr / dbo.gastos
+loResp = chalonaEnviaEcf("ABC1234")
+
+IF loResp.ok
+  ? "OK encf:", goChalonaEcf.curChalMae.encf
+ELSE
+  ? "Error:", loResp.message
+ENDIF
+
+* Sincronizar estados pendientes con DGII
+loResp = chalonaSincronizaEstados()
+
+* Descargar documentos por rango de fechas
+loResp = chalonaDescargaDocumentosEcf("2026-01-01", "2026-01-31")
+```
+
+Eso es todo. El loader detecta versiones nuevas del motor automáticamente
+en cada llamada.
+
+## 4. ERP con tablas distintas (DBF, otro esquema)
+
+El motor Fox incluye lógica SQL Server estándar (`dbo.imtr` / `dbo.gastos`
+/ `dbo.imtrd` / `dbo.empresa` / `dbo.suplidor` / `dbo.clientes` /
+`dbo.fiscal` / `dbo.mercs`). Si tu ERP no encaja con esa estructura, usás
+la **capa de cursores**: tu código llena cursores VFP con shape rígido y
+el motor lee/reescribe ahí.
+
+```foxpro
+DO chalona-ecf-loader.prg
+
+* 1. Motor crea TODOS los cursores con shape rigido y vacios.
+goChalonaEcf.CrearCursores()
+
+* 2. Llena cursores con tus datos (de DBF, SQL Server custom, lo que sea).
+*    Schema documentado en SCHEMA-CURSORES.md.
+INSERT INTO curChalMae (fiscal, encf, control, fecha, valor, ...) VALUES (...)
+INSERT INTO curChalDet (precio, cantidad, descrip, ...) VALUES (...)
+INSERT INTO curChalEmp (rnc, nombre, direccion, iprecio) VALUES (...)
+INSERT INTO curChalCli (extranjero_flag, rnc, nombre) VALUES (...)
+* (curChalRef solo para NC/ND, curChalSup solo para gastos sin RNC, etc.)
+
+* 3. Motor lee cursores, envia a DGII y REESCRIBE curChalMae con respuesta
+*    (encf, estado, codigo_seguridad, fecha_firma, timbre, ...).
+loResp = goChalonaEcf.EnviarDesdeCursores(lcCtrl)
+
+* 4. Tu codigo lee curChalMae y persiste donde quieras (otra DBF, SQL, etc.).
+SELECT curChalMae
+GO TOP
+* curChalMae.encf, curChalMae.estado, curChalMae.codigo_seguridad ...
+```
+
+Ver `fox/SCHEMA-CURSORES.md` para el contrato exacto de cada cursor
+(columnas, tipos, largos). El shape es **petrificado** — Chalona nunca
+rompe compatibilidad.
+
+Para sync masivo de estados pendientes:
+
+```foxpro
+goChalonaEcf.CrearCursores()
+* Llenar curChalonaEncfEnProceso con (control, encf, es_gastos) por cada pendiente
+INSERT INTO curChalonaEncfEnProceso (control, encf, es_gastos) VALUES (...)
+* Motor consulta DGII en lotes y reescribe el cursor con estado actualizado
+loResp = goChalonaEcf.SincronizarDesdeCursor()
+* Recorrer curChalonaEncfEnProceso y persistir
+```
+
+Ver `fox/examples/alberto-ecf-cliente.prg` — cliente completo de ejemplo
+sobre DBF (no SQL Server) usando esta capa.
+
+## Documentación de integración
+
+[`chalona-ecf-integracion.html`](../fox/chalona-ecf-integracion.html)
+tiene la referencia completa de la API: funciones, parámetros, errores.
+
+## Gotchas VFP
+
+- ⛔ **No usar `RETURN` dentro de bloques `TRY/CATCH`**: VFP no lo permite
+  (error 2060). Usar un flag (`lcSalir = .T.`) y un `IF` después del `ENDTRY`.
+- Los `.fxp` cacheados por VFP no se invalidan automáticamente. El loader
+  resuelve esto generando nombres únicos por versión.
+- En producción, los `.fxp` viejos quedan en disco. Limpiar periódicamente.
+
+## Estructura del repo
+
+```
+fox/
+├── chalona-ecf-loader.prg           # ← copiar al ERP del cliente
+├── chalona-ecf.prg                  # motor (servido via HTTP por Chalona)
+├── chalona-ecf-integracion.html     # docs API completa
+├── SCHEMA-CURSORES.md               # contrato petrificado de cursores
+├── publicar.sh                      # publisher (solo si self-hosting)
+└── examples/
+    ├── alberto-ecf-cliente.prg      # cliente sobre DBF (capa cursores)
+    ├── ecf.prg                      # ejemplo simple SQL Server
+    ├── cncfe_basedata.prg           # helpers ejemplo
+    ├── cncfe_document.prg           # helpers ejemplo
+    └── manual-api-rest.html         # alternativa REST sin loader
+```
+
+---
+
+## Self-hosting (avanzado)
+
+Solo si querés correr tu propio server-ecf y publicar tu propio motor
+Fox (forkear el patrón). Caso típico: NO necesario para integradores.
+
+### Pre-requisitos extra
+
+- Postgres (mismo schema que server-ecf usa)
+- `psql` y `python3` en el PATH
+
+### 1. Aplicar schema
+
+```bash
+psql -h localhost -U postgres -d midb -f sql/schema.sql
+```
+
+### 2. Publicar tu primera versión
 
 ```bash
 cd fox
 PG_HOST=localhost PG_DB=midb PG_USER=postgres PG_PASS=secret \
-./publicar.sh
+  ./publicar.sh
 ```
 
-Por defecto publica a `entorno='test'`. Para producción:
+Sin args = `entorno='test'`. Para producción: `./publicar.sh --produccion`.
 
-```bash
-./publicar.sh --produccion
-```
+### 3. Hot-reload
 
-## 3. Setup en el cliente VFP
-
-Copia `chalona-ecf-loader.prg` a la instalación VFP del usuario. Llama una
-vez al arrancar tu ERP:
-
-```foxpro
-DO chalona-ecf-loader.prg
-```
-
-A diferencia de los clientes Dart/C#/TypeScript/Python, **el loader Fox NO se
-conecta a Postgres**. Habla HTTP con el server-ecf (Dart) y este último es
-quien consulta `data.fox_cliente_script` en Postgres.
-
-Flujo del loader la primera vez (y en cada llamada):
-
-1. `MSXML2.XMLHTTP` POST a `https://<servidor-ecf>/fox_cliente_script`
-   con body `{"request":"fox_cliente_script","data":{"entorno":"test"}}`.
-2. server-ecf consulta Postgres y responde JSON con `script` + `version`.
-3. Si la versión local no coincide, el loader guarda el script como
-   `chalona-ecf-<timestamp>.prg`, lo compila a `.fxp`.
-4. `SET PROCEDURE TO chalona-ecf-<timestamp>.fxp ADDITIVE`.
-
-A partir de ahí las llamadas a funciones del cliente (`chalonaEnviaEcf`,
-`chalonaSincronizaEstados`, `chalonaDescargaDocumentosEcf`) resuelven al
-código nuevo.
-
-URL del servidor:
-- Por defecto el loader usa `https://ecf-service.vicortiz.com/`.
-- ERPs con `Public osis` (Vicortiz): se lee `osis.servidor_ecf` automáticamente.
-- ERPs sin osis: llamar `chalonaSetConfig(loCfg)` con `loCfg.servidor_ecf`
-  antes de la primera invocación.
-
-## 4. Hot-reload
-
-Modifica `chalona-ecf.prg`. Republica:
-
-```bash
-./publicar.sh
-```
-
-La próxima vez que el ERP del usuario llame al cliente, el loader detecta la
-versión nueva y la activa. Sin reinstalar VFP, sin recompilar el ERP.
-
-## Custom: ERP con tablas distintas
-
-El motor Fox incluye lógica para ERPs sobre SQL Server con `dbo.imtr` /
-`dbo.gastos` / `dbo.imtrd`. Si tu ERP es distinto (DBF, otras tablas,
-otro motor) usás la **capa de cursores**: el motor crea cursores VFP
-con shape rígido y vos los llenás con tus datos antes de enviar.
-
-```foxpro
-* Crear todos los cursores vacios (curChalMae, curChalDet, curChalEmp, ...).
-goChalonaEcf.CrearCursores()
-
-* Llenar cursores con tus datos (DBF, SQL, lo que sea).
-* Schema documentado en SCHEMA-CURSORES.md.
-INSERT INTO curChalMae (fiscal, encf, control, fecha, ...) VALUES (...)
-INSERT INTO curChalDet (precio, cantidad, descrip, ...) VALUES (...)
-
-* Motor lee cursores, envia a DGII y reescribe curChalMae con la respuesta.
-loResp = goChalonaEcf.EnviarDesdeCursores(lcCtrl)
-
-* Leer curChalMae actualizado y persistir donde quieras.
-```
-
-Ver `examples/alberto-ecf-cliente.prg` para un cliente completo sobre DBF.
-
-## Documentación de integración
-
-[`chalona-ecf-integracion.html`](../fox/chalona-ecf-integracion.html) tiene
-la referencia completa de la API del cliente Fox: funciones disponibles,
-parámetros, contrato del driver, errores.
-
-## Gotchas VFP
-
-- ⛔ **No usar `RETURN` dentro de bloques `TRY/CATCH`**: VFP no lo permite.
-  Usar un flag (`lcSalir = .T.`) y un `IF` después del `ENDTRY`.
-- Los `.fxp` cacheados por VFP no se invalidan automáticamente. El loader
-  resuelve esto generando nombres únicos por versión (`chalona-ecf-v9.fxp`).
-- En producción, el `.fxp` viejo queda en disco. Limpiar periódicamente.
-
-## Estructura
-
-```
-fox/
-├── chalona-ecf-loader.prg           # estatico en cliente (HTTP -> server-ecf)
-├── chalona-ecf.prg                  # motor (se descarga via HTTP, hot-reload)
-├── chalona-ecf-integracion.html     # docs API completa
-├── SCHEMA-CURSORES.md               # contrato petrificado de cursores VFP
-├── publicar.sh                      # publisher CLI (escribe a Postgres del server)
-└── examples/
-    ├── alberto-ecf-cliente.prg      # ejemplo de cliente sobre DBF (cursores)
-    ├── ecf.prg                      # ejemplo de uso
-    ├── cncfe_basedata.prg           # ejemplo
-    ├── cncfe_document.prg           # ejemplo
-    └── manual-api-rest.html         # alternativa REST sin loader
-```
+Modificá `chalona-ecf.prg`. Republicá con `./publicar.sh`. La próxima
+llamada de tus clientes detecta la versión nueva y la activa.
