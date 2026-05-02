@@ -98,9 +98,11 @@ Solo si el integrador no está familiarizado.
 
 ### Hot-reload
 
-- `data.<lang>_cliente_driver` guarda bytes del motor + sha256
-- Cliente: lookup → si versión ≠ activa, descarga + verifica sha + ejecuta en sandbox
-- Cada request al server lleva `<lang>_driver_version` + `<lang>_driver_entorno`; mismatch → `version_desactualizada`
+- Las versiones del motor viven en Postgres en `data.<lang>_cliente_driver` (Dart/C#/TS/Python) o `data.fox_cliente_script` (Fox).
+- **Fox**: el loader VFP NO se conecta a Postgres directo. Hace HTTP `POST /fox_cliente_script` al server-ecf (Dart) y este consulta Postgres y devuelve el script en JSON. VFP no tiene driver de Postgres ergonómico — por eso este salto.
+- **Dart / C# / TypeScript / Python**: el loader habla SQL directo a Postgres con la lib nativa del lenguaje (`package:postgres`, `Npgsql`, `pg`, `psycopg`). Sin server-ecf en el medio.
+- En todos los casos: si versión local ≠ activa → descarga bytes/script + verifica sha256 + ejecuta en sandbox del runtime.
+- Cada request al server lleva `<lang>_driver_version` + `<lang>_driver_entorno`; mismatch → `version_desactualizada`.
 
 El driver del integrador NO se publica a Chalona — vive en su código.
 

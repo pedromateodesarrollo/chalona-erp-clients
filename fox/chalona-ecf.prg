@@ -2,16 +2,23 @@
 
 *------------------------------------------------------------
 * Chalona ECF en FoxPro (modulo integrado en el ERP).
-* SQL: a traves del driver inyectado (default ChalonaEcfDriverSqlServer).
+* SQL Server estandar (dbo.imtr / dbo.gastos / dbo.imtrd / dbo.empresa /
+*   dbo.suplidor / dbo.clientes / dbo.fiscal / dbo.mercs): logica embebida en
+*   los metodos privados _Cargar*, _Guardar*, _Sync* de la clase ChalonaEcf.
+*   Integrador SQL Server estandar usa goChalonaEcf.Enviar(ctrl) tal cual.
+* Otros origenes (DBF, otro esquema, etc.): integrador llama
+*   goChalonaEcf.CrearCursores() + llena cursores + EnviarDesdeCursores(ctrl)
+*   o SincronizarDesdeCursor(). Ver SCHEMA-CURSORES.md.
 * Config: motor agnostico - opera contra un objeto loCfg con servidor_ecf,
 *   usuario_sync, pass_sync, portal_dgii, dgii_multimoneda. Inyectable via
 *   loEcf.SetConfig(loCfg). Default: ChalonaEcfConfigDesdeOsis() lee Public osis.
-* JSON DGII en Fox (driver), sistema_login, envia_ecf / consulta_estado.
-* Sincronizar estados en proceso: candado del driver; otra instancia activa => ok=.T., omitido_por_mutex.
-* Este archivo se sirve desde el servidor (fox_cliente_script) y lo carga
-* chalona-ecf-loader.prg: el loader instancia ChalonaEcf (goChalonaEcf) y
-* expone las funciones top-level chalonaEnviaEcf / chalonaSincronizaEstados /
-* chalonaDescargaDocumentosEcf, que invocan los metodos de la clase.
+* JSON DGII armado en Fox, sistema_login, envia_ecf / consulta_estado.
+* Sincronizar estados en proceso: lock SQL Server sp_getapplock; otra
+*   instancia activa => ok=.T., omitido_por_mutex.
+* Este archivo se sirve desde el servidor via HTTP (POST /fox_cliente_script)
+* y lo carga chalona-ecf-loader.prg: el loader instancia ChalonaEcf
+* (goChalonaEcf) y expone las funciones top-level chalonaEnviaEcf /
+* chalonaSincronizaEstados / chalonaDescargaDocumentosEcf.
 *------------------------------------------------------------
 
 *------------------------------------------------------------
@@ -237,14 +244,12 @@ Endfunc
 
 * Retorno: .Null. = fallo SQL; "" = sin fila imtr; cadena = JSON raiz listo para envia_ecf.
 Function ChalonaEcfBuildDocJsonFox
-  Lparameters tcControl, toDriver, toCfg
-  * toDriver: objeto con la API del driver (ver final del archivo). Si no llega
-  * o no es objeto (VFP entrega .F. en LParameters omitidos), se instancia el
-  * default ChalonaEcfDriverSqlServer.
+  Lparameters tcControl, toEcf, toCfg
+  * toEcf: instancia ChalonaEcf (para llamar metodos privados _Cargar*, _Contar*).
   * toCfg: objeto de configuración (ChalonaEcfCfgProp). Si no llega, se asume
   * que las flags como dgii_multimoneda están vacías.
-  If Vartype(toDriver) # "O"
-    toDriver = Createobject("ChalonaEcfDriverSqlServer")
+  If Vartype(toEcf) # "O"
+    Return .Null.
   Endif
   Local lcQ, lcSql, lcJson, lnTotalBruto, lnLn, lcDet, lcSep
   Local lcTipoeCF, lcEncf, ldFecEmi, lnDiasCr, lnValor, lnDescMae, lnItbis, lnTotal
@@ -307,13 +312,13 @@ Function ChalonaEcfBuildDocJsonFox
 
       * Determinar origen (imtr/gastos) y cargar el maestro via driver.
       Local loOrigen
-      loOrigen = toDriver.ContarOrigen(tcControl)
+      loOrigen = toEcf._ContarOrigen(tcControl)
       If (loOrigen.imtr + loOrigen.gastos) < 1
         lcOut = ""
         Exit
       Endif
       llEsGastos = (loOrigen.gastos = 1 And loOrigen.imtr = 0)
-      If Empty(Alltrim(toDriver.CargarMaestro(tcControl)))
+      If Empty(Alltrim(toEcf._CargarMaestro(tcControl)))
         llNull = .T.
         Exit
       Endif
@@ -411,7 +416,7 @@ Function ChalonaEcfBuildDocJsonFox
 
   * En gastos a veces el RNC no viene en la fila; buscarlo en suplidor para cumplir RNCComprador requerido.
   If llEsGastos And Empty(Alltrim(lcMaeRnc)) And !Empty(Alltrim(lcEntidad))
-    If !Empty(Alltrim(toDriver.CargarSuplidorRncNombre(lcEntidad))) ;
+    If !Empty(Alltrim(toEcf._CargarSuplidorRncNombre(lcEntidad))) ;
         And Used("curChalSup") And Reccount("curChalSup") > 0
       Select curChalSup
       Go Top
@@ -432,7 +437,7 @@ Function ChalonaEcfBuildDocJsonFox
     lcFecVen = _ChalonaEcfFmtDdMmYy(fechavencencf)
   Endif
   If Empty(Alltrim(lcFecVen)) And !Empty(lcTipoeCF)
-    If Empty(Alltrim(toDriver.CargarFiscalVence(lcTipoeCF)))
+    If Empty(Alltrim(toEcf._CargarFiscalVence(lcTipoeCF)))
       llNull = .T.
       Exit
     Endif
@@ -458,7 +463,7 @@ Function ChalonaEcfBuildDocJsonFox
   lcEmpNom = ""
   lcEmpDir = ""
       lnIprecio = 0
-  If Empty(Alltrim(toDriver.CargarEmpresa()))
+  If Empty(Alltrim(toEcf._CargarEmpresa()))
     llNull = .T.
     Exit
   Endif
@@ -485,7 +490,7 @@ Function ChalonaEcfBuildDocJsonFox
       * Compras: el tercero es suplidor (no clientes). extranjero vive en dbo.suplidor.
       lcSuplidorId = lcEntidad
       * Si falla, fallback silencioso a extranjero=0 (algunos ERPs no tienen suplidor).
-      If Empty(Alltrim(toDriver.CargarTerceroExtranjero(lcSuplidorId, .T.)))
+      If Empty(Alltrim(toEcf._CargarTerceroExtranjero(lcSuplidorId, .T.)))
         ChalonaEcfUseInIfUsed("curChalCli")
       Endif
       If Used("curChalCli") And Reccount("curChalCli") > 0
@@ -495,7 +500,7 @@ Function ChalonaEcfBuildDocJsonFox
       Endif
     Else
       * Ventas: el tercero viene de clientes.
-      If Empty(Alltrim(toDriver.CargarTerceroExtranjero(lcEntidad, .F.)))
+      If Empty(Alltrim(toEcf._CargarTerceroExtranjero(lcEntidad, .F.)))
         llNull = .T.
         Exit
       Endif
@@ -545,7 +550,7 @@ Function ChalonaEcfBuildDocJsonFox
       Endif
     Endif
     If !llOmitirRef
-      If Empty(Alltrim(toDriver.CargarReferenciaImtr(lcOcontrol)))
+      If Empty(Alltrim(toEcf._CargarReferenciaImtr(lcOcontrol)))
         llNull = .T.
         Exit
       Endif
@@ -613,7 +618,7 @@ Function ChalonaEcfBuildDocJsonFox
       Replace precio With Round(Iif(lnTasaFactor = 0, lnBaseSinItbis, (lnBaseSinItbis / lnTasaFactor)), 6) In curChalDet
     Endif
   Else
-    If Empty(Alltrim(toDriver.CargarDetalle(tcControl)))
+    If Empty(Alltrim(toEcf._CargarDetalle(tcControl)))
       llNull = .T.
       Exit
     Endif
@@ -1175,7 +1180,7 @@ Endfunc
 *   ejecuta el sync a la vez. Al terminar bien o al fallar (API/SQL) se libera el candado
 *   para que otra instancia pueda tomarlo en el prÃƒÆ’Ã‚Â³ximo intento. Si el candado estÃƒÆ’Ã‚Â¡ ocupado,
 *   ok=.T. con omitido_por_mutex (sin error).
-*   Driver -> SyncListarPendientes/Duplicados, lotes de 100 e-NCF a consulta_estado, GuardarRespuestaEnvio.
+*   _SyncListarPendientes/_SyncListarDuplicados, lotes de 100 e-NCF a consulta_estado, _GuardarRespuestaEnvio.
 *   Requiere la misma conexiÃƒÆ’Ã‚Â³n SQL durante todo el mÃƒÆ’Ã‚Â©todo (Request habitual).
 *============================================================
 Define Class ChalonaEcf As Custom
@@ -1194,10 +1199,6 @@ Define Class ChalonaEcf As Custom
   Cfg = .Null.
   * Si .F., Enviar no abre el formulario largo; igual se muestra MESSAGEBOX breve si hay error.
   MostrarFormularioError = .T.
-  * Driver de datos: por defecto ChalonaEcfDriverSqlServer (ERP sobre SQL Server,
-  * dbo.imtr / dbo.gastos / dbo.imtrd / etc.). Inyectable con SetDriver()
-  * para soportar otros orÃ­genes (DBFs, otro esquema). Ver contrato al final del archivo.
-  Driver = .Null.
 
   * Constructor: credenciales y URL desde This.Cfg.
   * Si nadie inyectó vía SetConfig() antes de Init, se arma desde Public osis.
@@ -1213,10 +1214,6 @@ Define Class ChalonaEcf As Custom
     lcUrl = Alltrim(ChalonaEcfCfgProp("servidor_ecf", This.Cfg))
     If !Empty(lcUrl)
       This.BaseUrl = lcUrl
-    Endif
-    * Driver default: SqlServer. Reemplazable con SetDriver() después de instanciar.
-    If Vartype(This.Driver) # "O"
-      This.Driver = Createobject("ChalonaEcfDriverSqlServer")
     Endif
   Endproc
 
@@ -1235,15 +1232,6 @@ Define Class ChalonaEcf As Custom
     lcUrl = Alltrim(ChalonaEcfCfgProp("servidor_ecf", This.Cfg))
     If !Empty(lcUrl)
       This.BaseUrl = lcUrl
-    Endif
-  Endproc
-
-  * Reemplazar driver de datos. Llamar despuÃ©s de Createobject("ChalonaEcf").
-  * Cualquier objeto con la firma del contrato (ver final del archivo) sirve.
-  Procedure SetDriver
-    Lparameters toDriver
-    If Vartype(toDriver) = "O"
-      This.Driver = toDriver
     Endif
   Endproc
 
@@ -1372,7 +1360,7 @@ Define Class ChalonaEcf As Custom
         lcBaseUrl = This.GetBaseUrl()
 
         * --- JSON DGII en Fox: SELECTs simples (sin dbo.ecf2json / FOR JSON en el servidor) ---
-        lcDocJson = ChalonaEcfBuildDocJsonFox(tcControl, This.Driver, This.Cfg)
+        lcDocJson = ChalonaEcfBuildDocJsonFox(tcControl, This, This.Cfg)
         If Isnull(lcDocJson)
           ChalonaEcfLogError("JSON: ChalonaEcfBuildDocJsonFox devolviÃ³ .Null.", tcControl, "")
           If Type("gcChalonaEcfBuildDocError") = "C" And !Empty(Alltrim(Nvl(gcChalonaEcfBuildDocError, "")))
@@ -1462,7 +1450,7 @@ Define Class ChalonaEcf As Custom
     If Empty(tcControl)
       Return ""
     Endif
-    loRes = This.Driver.ContarOrigen(tcControl)
+    loRes = This._ContarOrigen(tcControl)
     lnImtr = 0 + Nvl(loRes.imtr, 0)
     lnGastos = 0 + Nvl(loRes.gastos, 0)
     If (lnImtr + lnGastos) > 1
@@ -1494,7 +1482,7 @@ Define Class ChalonaEcf As Custom
       * imtr o "" (no identificado) -> imtr por compatibilidad.
       llEsGastos = .F.
     Endcase
-    This.Driver.GuardarRespuestaEnvio(tcControl, loData, llEsGastos)
+    This._GuardarRespuestaEnvio(tcControl, loData, llEsGastos)
   Endproc
 
   * Error de envio: persistir respuesta_mensajes en imtr o gastos.
@@ -1516,7 +1504,7 @@ Define Class ChalonaEcf As Custom
     If Empty(Alltrim(Nvl(lcMsg, "")))
       Return
     Endif
-    This.Driver.MarcarErrorEnvio(tcControl, lcMsg, llEsGastos)
+    This._MarcarErrorEnvio(tcControl, lcMsg, llEsGastos)
   Endproc
 
 
@@ -1575,7 +1563,7 @@ Define Class ChalonaEcf As Custom
     llGotLock = .F.
 
     * Candado (mutex) delegado al driver.
-    lnLockRes = This.Driver.SyncIntentarLock()
+    lnLockRes = This._SyncIntentarLock()
     If lnLockRes = -99
       Return ChalonaResponseNew(.F., "sql.chalona_ecf_sync_estados_mutex_try.error", "", "")
     Endif
@@ -1596,7 +1584,7 @@ Define Class ChalonaEcf As Custom
 
     Do While .T.
     * Listado de pendientes "en proceso" (delegado al driver).
-    lcCur = This.Driver.SyncListarPendientes()
+    lcCur = This._SyncListarPendientes()
     If Empty(Alltrim(lcCur))
       loFinal = ChalonaResponseNew(.F., "sql.chalona_imtr_list_encf_en_proceso.error", "", "")
       Exit
@@ -1608,7 +1596,7 @@ Define Class ChalonaEcf As Custom
 
     * Validar: no debe venir el mismo control en imtr y gastos (delegado al driver).
     Local lcCurDup
-    lcCurDup = This.Driver.SyncListarDuplicados()
+    lcCurDup = This._SyncListarDuplicados()
     If Empty(Alltrim(lcCurDup))
       loFinal = ChalonaResponseNew(.F., "sql.chalona_ecf_list_duplicados_en_proceso.error", "", "")
       Exit
@@ -1708,8 +1696,8 @@ Define Class ChalonaEcf As Custom
       Exit
     Endif
 
-    * Driver persiste el cursor con los resultados.
-    This.Driver.SyncFinalizar()
+    * Persistencia de los resultados del cursor en dbo.imtr/dbo.gastos.
+    This._SyncFinalizar()
 
     loFinal = Createobject("ChalonaResponse")
     loFinal.ok = .T.
@@ -1724,7 +1712,7 @@ Define Class ChalonaEcf As Custom
     Enddo
 
     If llGotLock
-      This.Driver.SyncLiberarLock()
+      This._SyncLiberarLock()
     Endif
     Return loFinal
   Endfunc
@@ -1857,6 +1845,802 @@ Define Class ChalonaEcf As Custom
     loHttp = .Null.
     Return ChalonaResponseFromApiBody(lcResp)
   Endproc
+
+  *==========================================================================
+  * Capa de cursores publica (nueva mecanica para integradores no-SqlServer).
+  *==========================================================================
+
+  * Crea TODOS los cursores vacios con shape rigido. Ver SCHEMA-CURSORES.md.
+  * Llamar antes de EnviarDesdeCursores / SincronizarDesdeCursor /
+  * DescargarDocumentosACursor cuando el integrador llena los cursores el mismo.
+  Procedure CrearCursores
+    ChalonaEcfUseInIfUsed("curChalMae")
+    Create Cursor curChalMae ;
+      (fiscal              C(2), ;
+       encf                C(20), ;
+       ncf                 C(20), ;
+       control             C(40), ;
+       fecha               D, ;
+       valor               N(18,2), ;
+       descuento           N(18,2), ;
+       itbis               N(18,2), ;
+       total               N(18,2), ;
+       tasa                N(18,4), ;
+       moneda              C(10), ;
+       rnc                 C(20), ;
+       nombre              C(150), ;
+       entidad             C(20), ;
+       ocontrol            C(40), ;
+       fechavencencf       D, ;
+       dgii_codmod         N(2), ;
+       itbisr              N(18,2), ;
+       isr                 N(18,2), ;
+       diascr              N(5,0), ;
+       comentario          C(200), ;
+       referencia          C(40), ;
+       doc                 C(40), ;
+       numero              C(40), ;
+       estado              C(200), ;
+       estado_descripcion  C(500), ;
+       codigo_seguridad    C(200), ;
+       fecha_firma         C(100), ;
+       timbre              C(500), ;
+       secuencia_utilizada N(1), ;
+       momento             C(50), ;
+       respuesta_mensajes  C(500))
+
+    ChalonaEcfUseInIfUsed("curChalDet")
+    Create Cursor curChalDet ;
+      (precio         N(18,6), ;
+       cantidad       N(18,4), ;
+       descrip        C(200), ;
+       mercs_nombre   C(200), ;
+       mercs_servicio N(2), ;
+       itbis          N(18,2), ;
+       itbis_retenido N(18,2), ;
+       isr_retenido   N(18,2))
+
+    ChalonaEcfUseInIfUsed("curChalEmp")
+    Create Cursor curChalEmp ;
+      (rnc       C(20), ;
+       nombre    C(150), ;
+       direccion C(200), ;
+       iprecio   N(1))
+
+    ChalonaEcfUseInIfUsed("curChalCli")
+    Create Cursor curChalCli ;
+      (extranjero_flag N(1), ;
+       rnc             C(20), ;
+       nombre          C(150))
+
+    ChalonaEcfUseInIfUsed("curChalRef")
+    Create Cursor curChalRef ;
+      (encf  C(20), ;
+       fecha D)
+
+    ChalonaEcfUseInIfUsed("curChalFis")
+    Create Cursor curChalFis (vence D)
+
+    ChalonaEcfUseInIfUsed("curChalSup")
+    Create Cursor curChalSup ;
+      (rnc    C(20), ;
+       nombre C(150))
+
+    ChalonaEcfUseInIfUsed("curChalonaEncfEnProceso")
+    Create Cursor curChalonaEncfEnProceso ;
+      (control             C(40), ;
+       encf                C(20), ;
+       es_gastos           L, ;
+       numero              C(20), ;
+       estado              C(200), ;
+       estado_descripcion  C(500), ;
+       codigo_seguridad    C(200), ;
+       fecha_firma         C(100), ;
+       timbre              C(500), ;
+       secuencia_utilizada N(1), ;
+       momento             C(50))
+
+    ChalonaEcfUseInIfUsed("curChalDescarga")
+    Create Cursor curChalDescarga (zip_path C(260))
+  Endproc
+
+  *--------------------------------------------------------------------------
+  * Lee cursores ya poblados (curChalMae, curChalDet, curChalEmp, ...),
+  * arma el JSON DGII, lo envia a /envia_ecf y reescribe curChalMae con la
+  * respuesta (encf, estado, codigo_seguridad, fecha_firma, timbre, ...).
+  * No persiste en BD del cliente -> integrador lee curChalMae y guarda el mismo.
+  Procedure EnviarDesdeCursores
+    Lparameters tcControl
+    Local lcUsuario, lcClave, lcPortal, lcBaseUrl
+    Local lcDocJson, lcRncEmisor, lcSendReq, loOut, loEx, loResp, loData
+    Local llVersionDesact
+
+    lcSendReq = ""
+    llVersionDesact = .F.
+    tcControl = Iif(Vartype(tcControl) = "C", Alltrim(tcControl), "")
+    If Empty(tcControl)
+      Return ChalonaResponseNew(.F., "control requerido", "", "")
+    Endif
+
+    Try
+      loResp = ChalonaResponseNew(.F., "error.no_manejado", "", "")
+      Do While .T.
+        This._Login()
+        If Empty(This.Token)
+          ChalonaEcfLogError("LOGIN: token vacio (cursores)", tcControl, "")
+          loResp = ChalonaResponseNew(.F., "login.fallo", "", "")
+          Exit
+        Endif
+        lcUsuario = This.Usuario
+        lcClave   = This.Clave
+        lcPortal  = This.Portal
+        If Empty(lcUsuario) Or Empty(lcClave) Or Empty(lcPortal)
+          loResp = ChalonaResponseNew(.F., "credenciales.requeridas", "", "")
+          Exit
+        Endif
+        lcBaseUrl = This.GetBaseUrl()
+
+        lcDocJson = ChalonaEcfBuildDocJsonFox(tcControl, This, This.Cfg)
+        If Isnull(lcDocJson)
+          If Type("gcChalonaEcfBuildDocError") = "C" And !Empty(Alltrim(Nvl(gcChalonaEcfBuildDocError, "")))
+            loResp = ChalonaResponseNew(.F., gcChalonaEcfBuildDocError, "", "")
+          Else
+            loResp = ChalonaResponseNew(.F., "ecf.build.error", "", "")
+          Endif
+          Exit
+        Endif
+        If Empty(lcDocJson)
+          loResp = ChalonaResponseNew(.F., "ecf.build.vacio", "", "")
+          Exit
+        Endif
+        ChalonaEcfSaveUltimoJson(tcControl, lcDocJson)
+
+        lcRncEmisor = Alltrim(Strextract(lcDocJson, '"RNCEmisor":"', '"', 1, 3))
+        If Empty(lcRncEmisor)
+          loResp = ChalonaResponseNew(.F., "json.sin_rnc_emisor", "", lcDocJson)
+          Exit
+        Endif
+
+        lcSendReq = ;
+          '{"locale":"es","rnc":"' + _JsonEscape(lcRncEmisor) + ;
+          '","portal":"' + _JsonEscape(lcPortal) + ;
+          '","json":' + lcDocJson + ;
+          '}'
+
+        loOut = This._HttpPostJson(lcBaseUrl + "envia_ecf", lcSendReq, This.Token)
+        If Vartype(loOut) # "O"
+          loResp = ChalonaResponseNew(.F., "http.error", "", "")
+          Exit
+        Endif
+
+        If PemStatus(loOut, "ok", 5) And !loOut.ok ;
+            And Atc('"fox_cliente.version_desactualizada"', Nvl(loOut.rawBody, "")) > 0
+          llVersionDesact = .T.
+          loResp = loOut
+          Exit
+        Endif
+
+        loResp = loOut
+        If loOut.ok And Vartype(loOut.data) = "O"
+          This._ActualizarCurChalMaeConRespuesta(loOut.data)
+        Endif
+        Exit
+      Enddo
+    Catch To loEx
+      ChalonaEcfLogException("UNHANDLED: EnviarDesdeCursores", tcControl, loEx, "")
+      loResp = ChalonaResponseNew(.F., "error.no_manejado", "", "")
+    Endtry
+
+    If Vartype(loResp) = "O" ;
+        And PemStatus(loResp, "requestBody", 5) ;
+        And Empty(Alltrim(Nvl(loResp.requestBody, ""))) ;
+        And Not Empty(Nvl(lcSendReq, ""))
+      loResp.requestBody = lcSendReq
+    Endif
+    Return loResp
+  Endproc
+
+  *--------------------------------------------------------------------------
+  * Toma curChalonaEncfEnProceso (que el integrador lleno con control+encf+es_gastos),
+  * consulta DGII en lotes de 100 y reescribe el mismo cursor con estado
+  * actualizado. No persiste en BD del cliente. Sin lock (integrador maneja
+  * concurrencia el mismo si aplica).
+  Function SincronizarDesdeCursor
+    Local lcCur, lnTot, lnI, lnStart, lnEnd, j, k
+    Local lcJson, loRet, loData, loResult, loItem, lcNum, lnUpd
+    Local laEncf, laCtrl
+    Local loFinal, loSum
+
+    lcCur = "curChalonaEncfEnProceso"
+    If !Used(lcCur)
+      Return ChalonaResponseNew(.F., "sync.cursor.no_existe", lcCur, "")
+    Endif
+    Select (lcCur)
+    lnTot = Reccount()
+    If lnTot < 1
+      loFinal = Createobject("ChalonaResponse")
+      loFinal.ok = .T.
+      loFinal.message = ""
+      loFinal.rawBody = ""
+      loSum = Createobject("Empty")
+      AddProperty(loSum, "consultados", 0)
+      AddProperty(loSum, "sincronizados", 0)
+      loFinal.data = loSum
+      Return loFinal
+    Endif
+
+    Dimension laEncf[lnTot], laCtrl[lnTot]
+    lnI = 0
+    Scan
+      lnI = lnI + 1
+      laEncf[lnI] = Alltrim(Transform(encf))
+      laCtrl[lnI] = Alltrim(Transform(control))
+    Endscan
+
+    lnUpd = 0
+    For lnStart = 1 To lnTot Step 100
+      lnEnd = Min(lnStart + 99, lnTot)
+      lcJson = "["
+      For j = lnStart To lnEnd
+        If j > lnStart
+          lcJson = lcJson + ","
+        Endif
+        lcJson = lcJson + '"' + _JsonEscape(laEncf[j]) + '"'
+      Endfor
+      lcJson = lcJson + "]"
+
+      loRet = This.ConsultarEstado(lcJson)
+      If !loRet.ok
+        Return loRet
+      Endif
+
+      loData = loRet.data
+      If Vartype(loData) # "O" Or !PemStatus(loData, "result", 5)
+        Loop
+      Endif
+      loResult = loData.result
+      If Vartype(loResult) # "O"
+        Loop
+      Endif
+
+      For k = 1 To loResult.Count
+        loItem = loResult.Item(k)
+        If Vartype(loItem) # "O"
+          Loop
+        Endif
+        lcNum = ""
+        If PemStatus(loItem, "numero", 5)
+          lcNum = Alltrim(Transform(loItem.numero))
+        Endif
+        If Empty(lcNum)
+          Loop
+        Endif
+        Select (lcCur)
+        Locate For Upper(Alltrim(encf)) == Upper(lcNum)
+        If Found()
+          Replace ;
+            numero               With lcNum, ;
+            estado               With Left(Alltrim(Transform(Iif(PemStatus(loItem, "estado", 5), loItem.estado, ""))), 200), ;
+            estado_descripcion   With Left(Alltrim(Transform(Iif(PemStatus(loItem, "estado_descripcion", 5), loItem.estado_descripcion, ""))), 500), ;
+            codigo_seguridad     With Left(Alltrim(Transform(Iif(PemStatus(loItem, "codigo_seguridad", 5), loItem.codigo_seguridad, ""))), 200), ;
+            fecha_firma          With Left(Alltrim(Transform(Iif(PemStatus(loItem, "fecha_firma", 5), loItem.fecha_firma, ""))), 100), ;
+            timbre               With Alltrim(Transform(Iif(PemStatus(loItem, "timbre", 5), loItem.timbre, ""))), ;
+            secuencia_utilizada  With Iif(PemStatus(loItem, "secuencia_utilizada", 5) And loItem.secuencia_utilizada, 1, 0), ;
+            momento              With Left(Alltrim(Transform(Iif(PemStatus(loItem, "momento", 5), loItem.momento, ""))), 50)
+          lnUpd = lnUpd + 1
+        Endif
+      Next k
+    Next lnStart
+
+    loFinal = Createobject("ChalonaResponse")
+    loFinal.ok = .T.
+    loFinal.message = ""
+    loFinal.rawBody = ""
+    loSum = Createobject("Empty")
+    AddProperty(loSum, "consultados", lnTot)
+    AddProperty(loSum, "sincronizados", lnUpd)
+    loFinal.data = loSum
+    Return loFinal
+  Endfunc
+
+  *--------------------------------------------------------------------------
+  * Wrapper: invoca DescargarDocumentos y deja el path del ZIP en
+  * curChalDescarga.zip_path (ademas del retorno).
+  Procedure DescargarDocumentosACursor
+    Lparameters tcFechaDesde, tcFechaHasta, tcTiposJson
+    Local loResp, lcZip
+    loResp = This.DescargarDocumentos(tcFechaDesde, tcFechaHasta, tcTiposJson)
+    If Vartype(loResp) = "O" And loResp.ok ;
+        And Used("curChalDescarga")
+      lcZip = ""
+      If PemStatus(loResp, "data", 5) And Vartype(loResp.data) = "O" ;
+          And PemStatus(loResp.data, "zip_path", 5)
+        lcZip = Alltrim(Transform(Nvl(loResp.data.zip_path, "")))
+      Endif
+      Select curChalDescarga
+      If Reccount() = 0
+        Append Blank
+      Endif
+      Replace zip_path With Left(lcZip, 260)
+    Endif
+    Return loResp
+  Endproc
+
+  *==========================================================================
+  * Helpers privados — escriben/leen cursores con shape conocido.
+  *==========================================================================
+
+  * Despues de envia_ecf exitoso, copia campos de la respuesta DGII a curChalMae.
+  Procedure _ActualizarCurChalMaeConRespuesta
+    Lparameters loData
+    If Vartype(loData) # "O" Or !Used("curChalMae") Or Reccount("curChalMae") < 1
+      Return
+    Endif
+    Local lcNumero, lcEstado, lcEstadoDes, lcCod, lcFf, lcTimb, lcMom, lnSec
+    lcNumero = Iif(PemStatus(loData, "numero", 5), Alltrim(Transform(loData.numero)), "")
+    lcEstado = Iif(PemStatus(loData, "estado", 5), Alltrim(Transform(loData.estado)), "")
+    lcEstadoDes = Iif(PemStatus(loData, "estado_descripcion", 5), Alltrim(Transform(loData.estado_descripcion)), "")
+    lcCod = Iif(PemStatus(loData, "codigo_seguridad", 5), Alltrim(Transform(loData.codigo_seguridad)), "")
+    lcFf = Iif(PemStatus(loData, "fecha_firma", 5), Alltrim(Transform(loData.fecha_firma)), "")
+    lcTimb = Iif(PemStatus(loData, "timbre", 5), Alltrim(Transform(loData.timbre)), "")
+    lcMom = Iif(PemStatus(loData, "momento", 5), Alltrim(Transform(loData.momento)), "")
+    lnSec = Iif(PemStatus(loData, "secuencia_utilizada", 5) And loData.secuencia_utilizada, 1, 0)
+
+    Select curChalMae
+    Go Top
+    * Si es ventas (encf vacio y numero retornado) -> setear encf;
+    * en gastos motor reescribe ncf.
+    If Type("curChalMae.encf") # "U" And Empty(Alltrim(Nvl(encf, ""))) ;
+        And !Empty(lcNumero)
+      Replace encf With Left(lcNumero, 20)
+    Endif
+    If Type("curChalMae.ncf") # "U" And !Empty(lcNumero) ;
+        And Empty(Alltrim(Nvl(ncf, "")))
+      Replace ncf With Left(lcNumero, 20)
+    Endif
+    If Type("curChalMae.estado") # "U"
+      Replace estado With Left(lcEstado, 200)
+    Endif
+    If Type("curChalMae.estado_descripcion") # "U"
+      Replace estado_descripcion With Left(lcEstadoDes, 500)
+    Endif
+    If Type("curChalMae.codigo_seguridad") # "U"
+      Replace codigo_seguridad With Left(lcCod, 200)
+    Endif
+    If Type("curChalMae.fecha_firma") # "U"
+      Replace fecha_firma With Left(lcFf, 100)
+    Endif
+    If Type("curChalMae.timbre") # "U"
+      Replace timbre With Left(lcTimb, 500)
+    Endif
+    If Type("curChalMae.secuencia_utilizada") # "U"
+      Replace secuencia_utilizada With lnSec
+    Endif
+    If Type("curChalMae.momento") # "U"
+      Replace momento With Left(lcMom, 50)
+    Endif
+  Endproc
+
+  *==========================================================================
+  * Lectura de datos del ERP SQL Server (antes ChalonaEcfDriverSqlServer).
+  * Embebido en el motor: el integrador con SQL Server estandar (dbo.imtr,
+  * dbo.gastos, dbo.imtrd, etc.) llama Enviar(ctrl) y estos metodos hacen
+  * Request() para llenar los cursores. Integradores con otro origen NO
+  * llaman Enviar; usan CrearCursores+EnviarDesdeCursores.
+  *==========================================================================
+
+  Function _CargarMaestro
+    Lparameters tcControl
+    Local lcQ, lcSql
+    If Vartype(tcControl) # "C"
+      tcControl = ""
+    Endif
+    lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
+    ChalonaEcfUseInIfUsed("curChalMae")
+    lcSql = "SELECT * FROM dbo.imtr WHERE control = " + lcQ
+    If !Request(lcSql, "curChalMae")
+      ChalonaEcfLogError("SQL: imtr (maestro)", tcControl, lcSql)
+      Return ""
+    Endif
+    If Used("curChalMae") And Reccount("curChalMae") >= 1
+      Return "curChalMae"
+    Endif
+    ChalonaEcfUseInIfUsed("curChalMae")
+    lcSql = "SELECT * FROM dbo.gastos WHERE control = " + lcQ
+    If !Request(lcSql, "curChalMae")
+      ChalonaEcfLogError("SQL: gastos (maestro)", tcControl, lcSql)
+      Return ""
+    Endif
+    Return "curChalMae"
+  Endfunc
+
+  Function _CargarDetalle
+    Lparameters tcControl
+    Local lcQ, lcSql
+    If Vartype(tcControl) # "C"
+      tcControl = ""
+    Endif
+    lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
+    ChalonaEcfUseInIfUsed("curChalDet")
+    lcSql = "SELECT d.*, m.nombre AS mercs_nombre, ISNULL(m.servicio, 0) AS mercs_servicio " + ;
+            "FROM dbo.imtrd d LEFT JOIN dbo.mercs m ON m.codigo = d.merc WHERE d.control = " + lcQ
+    If !Request(lcSql, "curChalDet")
+      ChalonaEcfLogError("SQL: imtrd+mercs (detalle)", tcControl, lcSql)
+      Return ""
+    Endif
+    Return "curChalDet"
+  Endfunc
+
+  Function _CargarFiscalVence
+    Lparameters tcTipoEcf
+    Local lcSql
+    If Vartype(tcTipoEcf) # "C"
+      tcTipoEcf = ""
+    Endif
+    ChalonaEcfUseInIfUsed("curChalFis")
+    lcSql = "SELECT TOP 1 vence FROM dbo.fiscal WHERE codigo = " + _ChalonaSqlQuote(Alltrim(tcTipoEcf))
+    If !Request(lcSql, "curChalFis")
+      ChalonaEcfLogError("SQL: fiscal (vencimiento)", tcTipoEcf, lcSql)
+      Return ""
+    Endif
+    Return "curChalFis"
+  Endfunc
+
+  Function _CargarEmpresa
+    Local lcSql
+    ChalonaEcfUseInIfUsed("curChalEmp")
+    lcSql = "SELECT TOP 1 rnc, nombre, direccion, iprecio FROM dbo.empresa"
+    If !Request(lcSql, "curChalEmp")
+      ChalonaEcfLogError("SQL: empresa (emisor)", "", lcSql)
+      Return ""
+    Endif
+    Return "curChalEmp"
+  Endfunc
+
+  Function _CargarSuplidorRncNombre
+    Lparameters tcCodigo
+    Local lcSql
+    If Vartype(tcCodigo) # "C"
+      tcCodigo = ""
+    Endif
+    ChalonaEcfUseInIfUsed("curChalSup")
+    lcSql = "SELECT TOP 1 rnc, nombre FROM dbo.suplidor WHERE codigo = " + _ChalonaSqlQuote(Alltrim(tcCodigo))
+    If !Request(lcSql, "curChalSup")
+      ChalonaEcfLogError("SQL: suplidor (rnc/nombre)", tcCodigo, lcSql)
+      Return ""
+    Endif
+    Return "curChalSup"
+  Endfunc
+
+  Function _CargarTerceroExtranjero
+    Lparameters tcCodigo, tlEsGastos
+    Local lcSql, lcCod
+    If Vartype(tcCodigo) # "C"
+      tcCodigo = ""
+    Endif
+    If Vartype(tlEsGastos) # "L"
+      tlEsGastos = .F.
+    Endif
+    lcCod = _ChalonaSqlQuote(Alltrim(tcCodigo))
+    ChalonaEcfUseInIfUsed("curChalCli")
+    If tlEsGastos
+      lcSql = "SELECT TOP 1 ISNULL(extranjero, 0) AS extranjero_flag FROM dbo.suplidor WHERE codigo = " + lcCod
+    Else
+      lcSql = "SELECT TOP 1 ISNULL(extranjero, 0) AS extranjero_flag, rnc, nombre FROM dbo.clientes WHERE codigo = " + lcCod
+    Endif
+    If !Request(lcSql, "curChalCli")
+      ChalonaEcfLogError("SQL: tercero (extranjero)", tcCodigo, lcSql)
+      Return ""
+    Endif
+    Return "curChalCli"
+  Endfunc
+
+  Function _CargarReferenciaImtr
+    Lparameters tcOcontrol
+    Local lcSql
+    If Vartype(tcOcontrol) # "C"
+      tcOcontrol = ""
+    Endif
+    ChalonaEcfUseInIfUsed("curChalRef")
+    lcSql = "SELECT TOP 1 encf, fecha FROM dbo.imtr WHERE control = " + _ChalonaSqlQuote(Alltrim(tcOcontrol))
+    If !Request(lcSql, "curChalRef")
+      ChalonaEcfLogError("SQL: imtr (referencia)", tcOcontrol, lcSql)
+      Return ""
+    Endif
+    Return "curChalRef"
+  Endfunc
+
+  Function _ContarOrigen
+    Lparameters tcControl
+    Local lcQ, lcSql, loRes
+    loRes = Createobject("Empty")
+    AddProperty(loRes, "imtr", 0)
+    AddProperty(loRes, "gastos", 0)
+    If Vartype(tcControl) # "C"
+      tcControl = ""
+    Endif
+    lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
+    ChalonaEcfUseInIfUsed("curChalDocOrigen")
+    lcSql = "SELECT " + ;
+            "  (SELECT COUNT(1) FROM dbo.imtr WHERE control = " + lcQ + ") AS c_imtr, " + ;
+            "  (SELECT COUNT(1) FROM dbo.gastos WHERE control = " + lcQ + ") AS c_gastos;"
+    If !Request(lcSql, "curChalDocOrigen")
+      ChalonaEcfLogError("SQL: doc origen (imtr/gastos)", tcControl, lcSql)
+      ChalonaEcfUseInIfUsed("curChalDocOrigen")
+      Return loRes
+    Endif
+    If Used("curChalDocOrigen") And Reccount("curChalDocOrigen") > 0
+      Select curChalDocOrigen
+      Go Top
+      loRes.imtr = 0 + Nvl(c_imtr, 0)
+      loRes.gastos = 0 + Nvl(c_gastos, 0)
+    Endif
+    ChalonaEcfUseInIfUsed("curChalDocOrigen")
+    Return loRes
+  Endfunc
+
+  Function _GuardarRespuestaEnvio
+    Lparameters tcControl, loData, tlEsGastos
+    Local lcExec, lcNumero, lcEstado, lcMoment, lcMsg, lcCod, lcFf, lcTimb, lcSecBit
+    Local llOk, lcCol, lcTabla, lcMomCol, lnLargoMsg
+
+    If Vartype(tcControl) # "C"
+      tcControl = ""
+    Endif
+    If Vartype(tlEsGastos) # "L"
+      tlEsGastos = .F.
+    Endif
+    If Empty(tcControl) Or Vartype(loData) # "O"
+      Return .F.
+    Endif
+
+    lcNumero = ""
+    If PemStatus(loData, "numero", 5)
+      lcNumero = Alltrim(Transform(loData.numero))
+    Endif
+    If Empty(lcNumero)
+      Return .F.
+    Endif
+
+    lcEstado = ""
+    If PemStatus(loData, "estado", 5)
+      lcEstado = Alltrim(Transform(loData.estado))
+    Endif
+    If Empty(lcEstado) And PemStatus(loData, "estado_descripcion", 5)
+      lcEstado = Alltrim(Transform(loData.estado_descripcion))
+    Endif
+    If Len(lcEstado) > 200
+      lcEstado = Left(lcEstado, 200)
+    Endif
+
+    lcMoment = ""
+    If PemStatus(loData, "momento", 5)
+      lcMoment = Alltrim(Transform(loData.momento))
+    Endif
+    lcMoment = _ChalonaIsoSinZona(lcMoment)
+    lcMoment = _ChalonaIsoParaSqlDatetime(lcMoment)
+    If Len(lcMoment) > 100
+      lcMoment = Left(lcMoment, 100)
+    Endif
+    lcMoment = Left(lcMoment, 19)
+
+    lcMsg = ""
+    If PemStatus(loData, "estado_descripcion", 5)
+      lcMsg = Alltrim(Transform(loData.estado_descripcion))
+    Endif
+    lcMsg = _ChalonaImtrAcotarRespuestaMensajes(lcMsg)
+
+    lcCod = ""
+    If PemStatus(loData, "codigo_seguridad", 5)
+      lcCod = Alltrim(Transform(loData.codigo_seguridad))
+    Endif
+    If Len(lcCod) > 200
+      lcCod = Left(lcCod, 200)
+    Endif
+
+    lcFf = ""
+    If PemStatus(loData, "fecha_firma", 5)
+      lcFf = Alltrim(Transform(loData.fecha_firma))
+    Endif
+    If Len(lcFf) > 100
+      lcFf = Left(lcFf, 100)
+    Endif
+
+    lcTimb = ""
+    If PemStatus(loData, "timbre", 5)
+      lcTimb = Alltrim(Transform(loData.timbre))
+    Endif
+
+    lcSecBit = _ChalonaSecuenciaUtilizadaSqlBit(loData)
+
+    If tlEsGastos
+      lcTabla = "dbo.gastos"
+      lcCol   = "ncf"
+      lcMomCol = "_updated"
+      lnLargoMsg = 250
+    Else
+      lcTabla = "dbo.imtr"
+      lcCol   = "encf"
+      lcMomCol = "respuesta_fechaRecepcion"
+      lnLargoMsg = 254
+    Endif
+
+    lcExec = "UPDATE " + lcTabla + " SET " + ;
+      lcCol + " = CASE " + ;
+      "  WHEN NULLIF(LTRIM(RTRIM(" + _ChalonaSqlQuoteN(lcNumero) + ")), N'') IS NOT NULL " + ;
+      "  THEN LTRIM(RTRIM(" + _ChalonaSqlQuoteN(lcNumero) + ")) " + ;
+      "  ELSE " + lcCol + " END, " + ;
+      "respuesta_estado = " + _ChalonaSqlNullableN(lcEstado) + ", " + ;
+      "respuesta_secuenciaUtilizada = " + lcSecBit + ", " + ;
+      "respuesta_mensajes = CASE " + ;
+      "  WHEN " + _ChalonaSqlNullableN(lcMsg) + " IS NULL THEN NULL " + ;
+      "  ELSE LEFT(LTRIM(RTRIM(" + _ChalonaSqlNullableN(lcMsg) + ")), " + Transform(lnLargoMsg) + ") END, " + ;
+      "respuesta_codigo_seguridad = NULLIF(LTRIM(RTRIM(" + _ChalonaSqlNullableN(lcCod) + ")), N''), " + ;
+      "respuesta_timbre = " + _ChalonaSqlNullableN(lcTimb) + ", " + ;
+      "respuesta_fecha_firma = " + _ChalonaSqlNullableN(lcFf) + ", " + ;
+      lcMomCol + " = CASE " + ;
+      "  WHEN " + _ChalonaSqlNullableN(lcMoment) + " IS NULL THEN " + lcMomCol + " " + ;
+      "  WHEN ISDATE(" + _ChalonaSqlNullableN(lcMoment) + ") = 0 THEN " + lcMomCol + " " + ;
+      "  ELSE CONVERT(datetime, " + _ChalonaSqlNullableN(lcMoment) + ", 120) END " + ;
+      "WHERE control = " + _ChalonaSqlQuote(tcControl)
+
+    llOk = Request(lcExec)
+    If !llOk
+      ChalonaEcfLogError("SQL: " + lcTabla + " UPDATE (sync respuesta)", tcControl, lcExec)
+    Endif
+    Return llOk
+  Endfunc
+
+  Function _MarcarErrorEnvio
+    Lparameters tcControl, tcMensaje, tlEsGastos
+    Local lcExec, llOk, lcTabla, lnLargoMsg
+    If Vartype(tcControl) # "C"
+      tcControl = ""
+    Endif
+    If Vartype(tcMensaje) # "C"
+      tcMensaje = ""
+    Endif
+    If Vartype(tlEsGastos) # "L"
+      tlEsGastos = .F.
+    Endif
+    If Empty(tcControl) Or Empty(Alltrim(tcMensaje))
+      Return .F.
+    Endif
+    If tlEsGastos
+      lcTabla = "dbo.gastos"
+      lnLargoMsg = 250
+    Else
+      lcTabla = "dbo.imtr"
+      lnLargoMsg = 254
+    Endif
+    lcExec = "UPDATE " + lcTabla + " SET respuesta_mensajes = " + ;
+      "CASE " + ;
+      "  WHEN " + _ChalonaSqlNullableN(tcMensaje) + " IS NULL THEN NULL " + ;
+      "  ELSE LEFT(LTRIM(RTRIM(" + _ChalonaSqlNullableN(tcMensaje) + ")), " + Transform(lnLargoMsg) + ") END " + ;
+      "WHERE control = " + _ChalonaSqlQuote(tcControl)
+    llOk = Request(lcExec)
+    If !llOk
+      ChalonaEcfLogError("SQL: " + lcTabla + " UPDATE (marca error)", tcControl, lcExec)
+    Endif
+    Return llOk
+  Endfunc
+
+  Function _SyncIntentarLock
+    Local lcMutexCur, lnLockRes
+    lcMutexCur = "curChalonaMutex"
+    lnLockRes = -99
+    ChalonaEcfUseInIfUsed(lcMutexCur)
+    If !Request( ;
+        "DECLARE @r int; " + ;
+        "EXEC @r = sp_getapplock " + ;
+        "  @Resource = N'ChalonaEcf_SincronizarEstadosEnProceso', " + ;
+        "  @LockMode = N'Exclusive', " + ;
+        "  @LockOwner = N'Session', " + ;
+        "  @LockTimeout = 0; " + ;
+        "SELECT CAST(@r AS int) AS lock_result;", ;
+        lcMutexCur)
+      Return -99
+    Endif
+    If Used(lcMutexCur) And Reccount(lcMutexCur) > 0
+      Select (lcMutexCur)
+      lnLockRes = 0 + lock_result
+    Endif
+    ChalonaEcfUseInIfUsed(lcMutexCur)
+    Return lnLockRes
+  Endfunc
+
+  Procedure _SyncLiberarLock
+    Request( ;
+        "EXEC sp_releaseapplock " + ;
+        "  @Resource = N'ChalonaEcf_SincronizarEstadosEnProceso', " + ;
+        "  @LockOwner = N'Session';")
+  Endproc
+
+  Function _SyncListarPendientes
+    Local lcCur, lcRaw
+    lcCur = "curChalonaEncfEnProceso"
+    lcRaw = "curChalonaEncfRaw"
+    ChalonaEcfUseInIfUsed(lcCur)
+    ChalonaEcfUseInIfUsed(lcRaw)
+    If !Request( ;
+        "SELECT " + ;
+        "  LTRIM(RTRIM(i.control)) AS control, " + ;
+        "  LTRIM(RTRIM(i.encf)) AS encf, " + ;
+        "  CAST(0 AS bit) AS es_gastos " + ;
+        "FROM dbo.imtr AS i " + ;
+        "WHERE LOWER(LTRIM(RTRIM(ISNULL(i.respuesta_estado, N'')))) = N'en proceso' " + ;
+        "  AND NULLIF(LTRIM(RTRIM(i.encf)), N'') IS NOT NULL " + ;
+        "UNION ALL " + ;
+        "SELECT " + ;
+        "  LTRIM(RTRIM(g.control)), LTRIM(RTRIM(g.ncf)), CAST(1 AS bit) " + ;
+        "FROM dbo.gastos AS g " + ;
+        "WHERE LOWER(LTRIM(RTRIM(ISNULL(g.respuesta_estado, N'')))) = N'en proceso' " + ;
+        "  AND NULLIF(LTRIM(RTRIM(g.ncf)), N'') IS NOT NULL;", ;
+        lcRaw)
+      Return ""
+    Endif
+    Create Cursor (lcCur) ;
+      (control C(40), encf C(20), es_gastos L, ;
+       numero C(20), estado C(200), estado_descripcion C(500), ;
+       codigo_seguridad C(200), fecha_firma C(100), timbre C(500), ;
+       secuencia_utilizada N(1), momento C(50))
+    Select (lcRaw)
+    Scan
+      Insert Into (lcCur) (control, encf, es_gastos) ;
+        Values (Alltrim(Transform(control)), Alltrim(Transform(encf)), ;
+                Iif(Vartype(es_gastos) = "L", es_gastos, (0 + Nvl(es_gastos, 0)) > 0))
+    Endscan
+    ChalonaEcfUseInIfUsed(lcRaw)
+    Select (lcCur)
+    Return lcCur
+  Endfunc
+
+  Function _SyncFinalizar
+    Local lcCur, loData, lnSel
+    lcCur = "curChalonaEncfEnProceso"
+    If !Used(lcCur)
+      Return .T.
+    Endif
+    lnSel = Select()
+    Select (lcCur)
+    Scan For !Empty(Alltrim(numero))
+      loData = Createobject("Empty")
+      AddProperty(loData, "numero", Alltrim(numero))
+      AddProperty(loData, "estado", Alltrim(estado))
+      AddProperty(loData, "estado_descripcion", Alltrim(estado_descripcion))
+      AddProperty(loData, "codigo_seguridad", Alltrim(codigo_seguridad))
+      AddProperty(loData, "fecha_firma", Alltrim(fecha_firma))
+      AddProperty(loData, "timbre", Alltrim(timbre))
+      AddProperty(loData, "secuencia_utilizada", Iif(secuencia_utilizada = 1, .T., .F.))
+      AddProperty(loData, "momento", Alltrim(momento))
+      This._GuardarRespuestaEnvio(Alltrim(control), loData, es_gastos)
+    Endscan
+    Select (lnSel)
+    Return .T.
+  Endfunc
+
+  Function _SyncListarDuplicados
+    Local lcCur
+    lcCur = "curChalDup"
+    ChalonaEcfUseInIfUsed(lcCur)
+    If !Request( ;
+        "SELECT t.control " + ;
+        "FROM (" + ;
+        "  SELECT LTRIM(RTRIM(i.control)) AS control FROM dbo.imtr AS i " + ;
+        "  WHERE LOWER(LTRIM(RTRIM(ISNULL(i.respuesta_estado, N'')))) = N'en proceso' " + ;
+        "    AND NULLIF(LTRIM(RTRIM(i.encf)), N'') IS NOT NULL " + ;
+        "  UNION ALL " + ;
+        "  SELECT LTRIM(RTRIM(g.control)) AS control FROM dbo.gastos AS g " + ;
+        "  WHERE LOWER(LTRIM(RTRIM(ISNULL(g.respuesta_estado, N'')))) = N'en proceso' " + ;
+        "    AND NULLIF(LTRIM(RTRIM(g.ncf)), N'') IS NOT NULL " + ;
+        ") AS t " + ;
+        "GROUP BY t.control " + ;
+        "HAVING COUNT(1) > 1;", ;
+        lcCur)
+      Return ""
+    Endif
+    Return lcCur
+  Endfunc
 
 Enddefine
 
@@ -3032,475 +3816,3 @@ Function ChalonaEcfConfigDesdeOsis
   Endif
   Return lo
 Endfunc
-
-
-
-Define Class ChalonaEcfDriverSqlServer As Custom
-
-  *-------------------------------------------------------------------------
-  * Maestro: imtr (ventas) o gastos (compras). Fallback automÃ¡tico.
-  Function CargarMaestro
-    Lparameters tcControl
-    Local lcQ, lcSql
-    If Vartype(tcControl) # "C"
-      tcControl = ""
-    Endif
-    lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
-    ChalonaEcfUseInIfUsed("curChalMae")
-    lcSql = "SELECT * FROM dbo.imtr WHERE control = " + lcQ
-    If !Request(lcSql, "curChalMae")
-      ChalonaEcfLogError("SQL: imtr (maestro)", tcControl, lcSql)
-      Return ""
-    Endif
-    If Used("curChalMae") And Reccount("curChalMae") >= 1
-      Return "curChalMae"
-    Endif
-    * Fallback gastos
-    ChalonaEcfUseInIfUsed("curChalMae")
-    lcSql = "SELECT * FROM dbo.gastos WHERE control = " + lcQ
-    If !Request(lcSql, "curChalMae")
-      ChalonaEcfLogError("SQL: gastos (maestro)", tcControl, lcSql)
-      Return ""
-    Endif
-    Return "curChalMae"
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * .T. si maestro vino de gastos. Llamar despuÃ©s de CargarMaestro.
-  * Estrategia barata: contar en gastos con el mismo control.
-  Function EsGastos
-    Lparameters tcControl
-    Local lcQ, lcSql, llRes
-    llRes = .F.
-    If Vartype(tcControl) # "C"
-      tcControl = ""
-    Endif
-    lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
-    lcSql = "SELECT COUNT(1) AS c FROM dbo.gastos WHERE control = " + lcQ
-    ChalonaEcfUseInIfUsed("curChalEsGastos")
-    If Request(lcSql, "curChalEsGastos") And Used("curChalEsGastos") And Reccount("curChalEsGastos") > 0
-      Select curChalEsGastos
-      Go Top
-      llRes = (0 + Nvl(c, 0)) > 0
-    Endif
-    ChalonaEcfUseInIfUsed("curChalEsGastos")
-    Return llRes
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Detalle de imtr (ventas). En gastos el motor sintetiza, no llama esto.
-  Function CargarDetalle
-    Lparameters tcControl
-    Local lcQ, lcSql
-    If Vartype(tcControl) # "C"
-      tcControl = ""
-    Endif
-    lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
-    ChalonaEcfUseInIfUsed("curChalDet")
-    lcSql = "SELECT d.*, m.nombre AS mercs_nombre, ISNULL(m.servicio, 0) AS mercs_servicio " + ;
-            "FROM dbo.imtrd d LEFT JOIN dbo.mercs m ON m.codigo = d.merc WHERE d.control = " + lcQ
-    If !Request(lcSql, "curChalDet")
-      ChalonaEcfLogError("SQL: imtrd+mercs (detalle)", tcControl, lcSql)
-      Return ""
-    Endif
-    Return "curChalDet"
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  Function CargarFiscalVence
-    Lparameters tcTipoEcf
-    Local lcSql
-    If Vartype(tcTipoEcf) # "C"
-      tcTipoEcf = ""
-    Endif
-    ChalonaEcfUseInIfUsed("curChalFis")
-    lcSql = "SELECT TOP 1 vence FROM dbo.fiscal WHERE codigo = " + _ChalonaSqlQuote(Alltrim(tcTipoEcf))
-    If !Request(lcSql, "curChalFis")
-      ChalonaEcfLogError("SQL: fiscal (vencimiento)", tcTipoEcf, lcSql)
-      Return ""
-    Endif
-    Return "curChalFis"
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  Function CargarEmpresa
-    Local lcSql
-    ChalonaEcfUseInIfUsed("curChalEmp")
-    lcSql = "SELECT TOP 1 rnc, nombre, direccion, iprecio FROM dbo.empresa"
-    If !Request(lcSql, "curChalEmp")
-      ChalonaEcfLogError("SQL: empresa (emisor)", "", lcSql)
-      Return ""
-    Endif
-    Return "curChalEmp"
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Para gastos sin RNC en maestro: completarlo desde dbo.suplidor.
-  Function CargarSuplidorRncNombre
-    Lparameters tcCodigo
-    Local lcSql
-    If Vartype(tcCodigo) # "C"
-      tcCodigo = ""
-    Endif
-    ChalonaEcfUseInIfUsed("curChalSup")
-    lcSql = "SELECT TOP 1 rnc, nombre FROM dbo.suplidor WHERE codigo = " + _ChalonaSqlQuote(Alltrim(tcCodigo))
-    If !Request(lcSql, "curChalSup")
-      ChalonaEcfLogError("SQL: suplidor (rnc/nombre)", tcCodigo, lcSql)
-      Return ""
-    Endif
-    Return "curChalSup"
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Tercero (cliente o suplidor) para flag de extranjero.
-  *   tlEsGastos = .T. -> dbo.suplidor (solo extranjero_flag)
-  *   tlEsGastos = .F. -> dbo.clientes (extranjero_flag, rnc, nombre)
-  Function CargarTerceroExtranjero
-    Lparameters tcCodigo, tlEsGastos
-    Local lcSql, lcCod
-    If Vartype(tcCodigo) # "C"
-      tcCodigo = ""
-    Endif
-    If Vartype(tlEsGastos) # "L"
-      tlEsGastos = .F.
-    Endif
-    lcCod = _ChalonaSqlQuote(Alltrim(tcCodigo))
-    ChalonaEcfUseInIfUsed("curChalCli")
-    If tlEsGastos
-      lcSql = "SELECT TOP 1 ISNULL(extranjero, 0) AS extranjero_flag FROM dbo.suplidor WHERE codigo = " + lcCod
-    Else
-      lcSql = "SELECT TOP 1 ISNULL(extranjero, 0) AS extranjero_flag, rnc, nombre FROM dbo.clientes WHERE codigo = " + lcCod
-    Endif
-    If !Request(lcSql, "curChalCli")
-      ChalonaEcfLogError("SQL: tercero (extranjero)", tcCodigo, lcSql)
-      Return ""
-    Endif
-    Return "curChalCli"
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Lookup del NCF referenciado en imtr (para CodigoModificacion NC/ND).
-  Function CargarReferenciaImtr
-    Lparameters tcOcontrol
-    Local lcSql
-    If Vartype(tcOcontrol) # "C"
-      tcOcontrol = ""
-    Endif
-    ChalonaEcfUseInIfUsed("curChalRef")
-    lcSql = "SELECT TOP 1 encf, fecha FROM dbo.imtr WHERE control = " + _ChalonaSqlQuote(Alltrim(tcOcontrol))
-    If !Request(lcSql, "curChalRef")
-      ChalonaEcfLogError("SQL: imtr (referencia)", tcOcontrol, lcSql)
-      Return ""
-    Endif
-    Return "curChalRef"
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Origen del control: cuÃ¡ntas filas existen en imtr y gastos.
-  Function ContarOrigen
-    Lparameters tcControl
-    Local lcQ, lcSql, loRes
-    loRes = Createobject("Empty")
-    AddProperty(loRes, "imtr", 0)
-    AddProperty(loRes, "gastos", 0)
-    If Vartype(tcControl) # "C"
-      tcControl = ""
-    Endif
-    lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
-    ChalonaEcfUseInIfUsed("curChalDocOrigen")
-    lcSql = "SELECT " + ;
-            "  (SELECT COUNT(1) FROM dbo.imtr WHERE control = " + lcQ + ") AS c_imtr, " + ;
-            "  (SELECT COUNT(1) FROM dbo.gastos WHERE control = " + lcQ + ") AS c_gastos;"
-    If !Request(lcSql, "curChalDocOrigen")
-      ChalonaEcfLogError("SQL: doc origen (imtr/gastos)", tcControl, lcSql)
-      ChalonaEcfUseInIfUsed("curChalDocOrigen")
-      Return loRes
-    Endif
-    If Used("curChalDocOrigen") And Reccount("curChalDocOrigen") > 0
-      Select curChalDocOrigen
-      Go Top
-      loRes.imtr = 0 + Nvl(c_imtr, 0)
-      loRes.gastos = 0 + Nvl(c_gastos, 0)
-    Endif
-    ChalonaEcfUseInIfUsed("curChalDocOrigen")
-    Return loRes
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Persistir respuesta exitosa de DGII en imtr o gastos.
-  Function GuardarRespuestaEnvio
-    Lparameters tcControl, loData, tlEsGastos
-    Local lcExec, lcNumero, lcEstado, lcMoment, lcMsg, lcCod, lcFf, lcTimb, lcSecBit
-    Local llOk, lcCol, lcTabla, lcMomCol, lnLargoMsg
-
-    If Vartype(tcControl) # "C"
-      tcControl = ""
-    Endif
-    If Vartype(tlEsGastos) # "L"
-      tlEsGastos = .F.
-    Endif
-    If Empty(tcControl) Or Vartype(loData) # "O"
-      Return .F.
-    Endif
-
-    lcNumero = ""
-    If PemStatus(loData, "numero", 5)
-      lcNumero = Alltrim(Transform(loData.numero))
-    Endif
-    If Empty(lcNumero)
-      Return .F.
-    Endif
-
-    lcEstado = ""
-    If PemStatus(loData, "estado", 5)
-      lcEstado = Alltrim(Transform(loData.estado))
-    Endif
-    If Empty(lcEstado) And PemStatus(loData, "estado_descripcion", 5)
-      lcEstado = Alltrim(Transform(loData.estado_descripcion))
-    Endif
-    If Len(lcEstado) > 200
-      lcEstado = Left(lcEstado, 200)
-    Endif
-
-    lcMoment = ""
-    If PemStatus(loData, "momento", 5)
-      lcMoment = Alltrim(Transform(loData.momento))
-    Endif
-    lcMoment = _ChalonaIsoSinZona(lcMoment)
-    lcMoment = _ChalonaIsoParaSqlDatetime(lcMoment)
-    If Len(lcMoment) > 100
-      lcMoment = Left(lcMoment, 100)
-    Endif
-    lcMoment = Left(lcMoment, 19)
-
-    lcMsg = ""
-    If PemStatus(loData, "estado_descripcion", 5)
-      lcMsg = Alltrim(Transform(loData.estado_descripcion))
-    Endif
-    lcMsg = _ChalonaImtrAcotarRespuestaMensajes(lcMsg)
-
-    lcCod = ""
-    If PemStatus(loData, "codigo_seguridad", 5)
-      lcCod = Alltrim(Transform(loData.codigo_seguridad))
-    Endif
-    If Len(lcCod) > 200
-      lcCod = Left(lcCod, 200)
-    Endif
-
-    lcFf = ""
-    If PemStatus(loData, "fecha_firma", 5)
-      lcFf = Alltrim(Transform(loData.fecha_firma))
-    Endif
-    If Len(lcFf) > 100
-      lcFf = Left(lcFf, 100)
-    Endif
-
-    lcTimb = ""
-    If PemStatus(loData, "timbre", 5)
-      lcTimb = Alltrim(Transform(loData.timbre))
-    Endif
-
-    lcSecBit = _ChalonaSecuenciaUtilizadaSqlBit(loData)
-
-    If tlEsGastos
-      lcTabla = "dbo.gastos"
-      lcCol   = "ncf"
-      lcMomCol = "_updated"
-      lnLargoMsg = 250
-    Else
-      lcTabla = "dbo.imtr"
-      lcCol   = "encf"
-      lcMomCol = "respuesta_fechaRecepcion"
-      lnLargoMsg = 254
-    Endif
-
-    lcExec = "UPDATE " + lcTabla + " SET " + ;
-      lcCol + " = CASE " + ;
-      "  WHEN NULLIF(LTRIM(RTRIM(" + _ChalonaSqlQuoteN(lcNumero) + ")), N'') IS NOT NULL " + ;
-      "  THEN LTRIM(RTRIM(" + _ChalonaSqlQuoteN(lcNumero) + ")) " + ;
-      "  ELSE " + lcCol + " END, " + ;
-      "respuesta_estado = " + _ChalonaSqlNullableN(lcEstado) + ", " + ;
-      "respuesta_secuenciaUtilizada = " + lcSecBit + ", " + ;
-      "respuesta_mensajes = CASE " + ;
-      "  WHEN " + _ChalonaSqlNullableN(lcMsg) + " IS NULL THEN NULL " + ;
-      "  ELSE LEFT(LTRIM(RTRIM(" + _ChalonaSqlNullableN(lcMsg) + ")), " + Transform(lnLargoMsg) + ") END, " + ;
-      "respuesta_codigo_seguridad = NULLIF(LTRIM(RTRIM(" + _ChalonaSqlNullableN(lcCod) + ")), N''), " + ;
-      "respuesta_timbre = " + _ChalonaSqlNullableN(lcTimb) + ", " + ;
-      "respuesta_fecha_firma = " + _ChalonaSqlNullableN(lcFf) + ", " + ;
-      lcMomCol + " = CASE " + ;
-      "  WHEN " + _ChalonaSqlNullableN(lcMoment) + " IS NULL THEN " + lcMomCol + " " + ;
-      "  WHEN ISDATE(" + _ChalonaSqlNullableN(lcMoment) + ") = 0 THEN " + lcMomCol + " " + ;
-      "  ELSE CONVERT(datetime, " + _ChalonaSqlNullableN(lcMoment) + ", 120) END " + ;
-      "WHERE control = " + _ChalonaSqlQuote(tcControl)
-
-    llOk = Request(lcExec)
-    If !llOk
-      ChalonaEcfLogError("SQL: " + lcTabla + " UPDATE (sync respuesta)", tcControl, lcExec)
-    Endif
-    Return llOk
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Marcar error de envio (solo respuesta_mensajes).
-  Function MarcarErrorEnvio
-    Lparameters tcControl, tcMensaje, tlEsGastos
-    Local lcExec, llOk, lcTabla, lnLargoMsg
-    If Vartype(tcControl) # "C"
-      tcControl = ""
-    Endif
-    If Vartype(tcMensaje) # "C"
-      tcMensaje = ""
-    Endif
-    If Vartype(tlEsGastos) # "L"
-      tlEsGastos = .F.
-    Endif
-    If Empty(tcControl) Or Empty(Alltrim(tcMensaje))
-      Return .F.
-    Endif
-    If tlEsGastos
-      lcTabla = "dbo.gastos"
-      lnLargoMsg = 250
-    Else
-      lcTabla = "dbo.imtr"
-      lnLargoMsg = 254
-    Endif
-    lcExec = "UPDATE " + lcTabla + " SET respuesta_mensajes = " + ;
-      "CASE " + ;
-      "  WHEN " + _ChalonaSqlNullableN(tcMensaje) + " IS NULL THEN NULL " + ;
-      "  ELSE LEFT(LTRIM(RTRIM(" + _ChalonaSqlNullableN(tcMensaje) + ")), " + Transform(lnLargoMsg) + ") END " + ;
-      "WHERE control = " + _ChalonaSqlQuote(tcControl)
-    llOk = Request(lcExec)
-    If !llOk
-      ChalonaEcfLogError("SQL: " + lcTabla + " UPDATE (marca error)", tcControl, lcExec)
-    Endif
-    Return llOk
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Mutex de sincronizaciÃ³n masiva (sp_getapplock).
-  Function SyncIntentarLock
-    Local lcMutexCur, lnLockRes
-    lcMutexCur = "curChalonaMutex"
-    lnLockRes = -99
-    ChalonaEcfUseInIfUsed(lcMutexCur)
-    If !Request( ;
-        "DECLARE @r int; " + ;
-        "EXEC @r = sp_getapplock " + ;
-        "  @Resource = N'ChalonaEcf_SincronizarEstadosEnProceso', " + ;
-        "  @LockMode = N'Exclusive', " + ;
-        "  @LockOwner = N'Session', " + ;
-        "  @LockTimeout = 0; " + ;
-        "SELECT CAST(@r AS int) AS lock_result;", ;
-        lcMutexCur)
-      Return -99
-    Endif
-    If Used(lcMutexCur) And Reccount(lcMutexCur) > 0
-      Select (lcMutexCur)
-      lnLockRes = 0 + lock_result
-    Endif
-    ChalonaEcfUseInIfUsed(lcMutexCur)
-    Return lnLockRes
-  Endfunc
-
-  Procedure SyncLiberarLock
-    Request( ;
-        "EXEC sp_releaseapplock " + ;
-        "  @Resource = N'ChalonaEcf_SincronizarEstadosEnProceso', " + ;
-        "  @LockOwner = N'Session';")
-  Endproc
-
-  *-------------------------------------------------------------------------
-  * Cursor expandido: trae solo (control, encf, es_gastos) desde SQL Server,
-  * mas columnas vacias para que el motor escriba la respuesta DGII.
-  * El cursor es local (Create Cursor) -> escritura permitida sin reglas SQL.
-  Function SyncListarPendientes
-    Local lcCur, lcRaw
-    lcCur = "curChalonaEncfEnProceso"
-    lcRaw = "curChalonaEncfRaw"
-    ChalonaEcfUseInIfUsed(lcCur)
-    ChalonaEcfUseInIfUsed(lcRaw)
-    If !Request( ;
-        "SELECT " + ;
-        "  LTRIM(RTRIM(i.control)) AS control, " + ;
-        "  LTRIM(RTRIM(i.encf)) AS encf, " + ;
-        "  CAST(0 AS bit) AS es_gastos " + ;
-        "FROM dbo.imtr AS i " + ;
-        "WHERE LOWER(LTRIM(RTRIM(ISNULL(i.respuesta_estado, N'')))) = N'en proceso' " + ;
-        "  AND NULLIF(LTRIM(RTRIM(i.encf)), N'') IS NOT NULL " + ;
-        "UNION ALL " + ;
-        "SELECT " + ;
-        "  LTRIM(RTRIM(g.control)), LTRIM(RTRIM(g.ncf)), CAST(1 AS bit) " + ;
-        "FROM dbo.gastos AS g " + ;
-        "WHERE LOWER(LTRIM(RTRIM(ISNULL(g.respuesta_estado, N'')))) = N'en proceso' " + ;
-        "  AND NULLIF(LTRIM(RTRIM(g.ncf)), N'') IS NOT NULL;", ;
-        lcRaw)
-      Return ""
-    Endif
-    Create Cursor (lcCur) ;
-      (control C(40), encf C(20), es_gastos L, ;
-       numero C(20), estado C(200), estado_descripcion C(500), ;
-       codigo_seguridad C(200), fecha_firma C(100), timbre C(500), ;
-       secuencia_utilizada N(1), momento C(50))
-    Select (lcRaw)
-    Scan
-      Insert Into (lcCur) (control, encf, es_gastos) ;
-        Values (Alltrim(Transform(control)), Alltrim(Transform(encf)), ;
-                Iif(Vartype(es_gastos) = "L", es_gastos, (0 + Nvl(es_gastos, 0)) > 0))
-    Endscan
-    ChalonaEcfUseInIfUsed(lcRaw)
-    Select (lcCur)
-    Return lcCur
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  * Despues de que el motor escribe los resultados en el cursor de pendientes,
-  * recorrer y delegar a GuardarRespuestaEnvio fila por fila (UPDATE imtr/gastos).
-  Function SyncFinalizar
-    Local lcCur, loData, lnSel
-    lcCur = "curChalonaEncfEnProceso"
-    If !Used(lcCur)
-      Return .T.
-    Endif
-    lnSel = Select()
-    Select (lcCur)
-    Scan For !Empty(Alltrim(numero))
-      loData = Createobject("Empty")
-      AddProperty(loData, "numero", Alltrim(numero))
-      AddProperty(loData, "estado", Alltrim(estado))
-      AddProperty(loData, "estado_descripcion", Alltrim(estado_descripcion))
-      AddProperty(loData, "codigo_seguridad", Alltrim(codigo_seguridad))
-      AddProperty(loData, "fecha_firma", Alltrim(fecha_firma))
-      AddProperty(loData, "timbre", Alltrim(timbre))
-      AddProperty(loData, "secuencia_utilizada", Iif(secuencia_utilizada = 1, .T., .F.))
-      AddProperty(loData, "momento", Alltrim(momento))
-      This.GuardarRespuestaEnvio(Alltrim(control), loData, es_gastos)
-    Endscan
-    Select (lnSel)
-    Return .T.
-  Endfunc
-
-  *-------------------------------------------------------------------------
-  Function SyncListarDuplicados
-    Local lcCur
-    lcCur = "curChalDup"
-    ChalonaEcfUseInIfUsed(lcCur)
-    If !Request( ;
-        "SELECT t.control " + ;
-        "FROM (" + ;
-        "  SELECT LTRIM(RTRIM(i.control)) AS control FROM dbo.imtr AS i " + ;
-        "  WHERE LOWER(LTRIM(RTRIM(ISNULL(i.respuesta_estado, N'')))) = N'en proceso' " + ;
-        "    AND NULLIF(LTRIM(RTRIM(i.encf)), N'') IS NOT NULL " + ;
-        "  UNION ALL " + ;
-        "  SELECT LTRIM(RTRIM(g.control)) AS control FROM dbo.gastos AS g " + ;
-        "  WHERE LOWER(LTRIM(RTRIM(ISNULL(g.respuesta_estado, N'')))) = N'en proceso' " + ;
-        "    AND NULLIF(LTRIM(RTRIM(g.ncf)), N'') IS NOT NULL " + ;
-        ") AS t " + ;
-        "GROUP BY t.control " + ;
-        "HAVING COUNT(1) > 1;", ;
-        lcCur)
-      Return ""
-    Endif
-    Return lcCur
-  Endfunc
-
-EndDefine

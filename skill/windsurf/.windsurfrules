@@ -28,7 +28,7 @@ cp -r "$LANG_DIR" sql docs LICENSE "$DEST/chalona-ecf/"
 
 Dos piezas: **Motor** (Chalona, hot-reload BD, construye e-CF + valida + envía a DGII + sync) y **Driver de datos** (integrador, su ERP, contrato fijo).
 
-Hot-reload: bytes en `data.<lang>_cliente_driver` con sha256. Cliente lookup → si versión local ≠ activa, descarga + verifica sha + ejecuta en sandbox. Cada request lleva `<lang>_driver_version`+`<lang>_driver_entorno`; mismatch → `version_desactualizada`.
+Hot-reload: motor vive en Postgres (`data.<lang>_cliente_driver` para Dart/C#/TS/Python; `data.fox_cliente_script` para Fox). **Fox**: loader VFP no habla SQL — hace HTTP `POST /fox_cliente_script` al server-ecf (Dart) que consulta Postgres y devuelve script JSON. **Otros 4**: loader habla Postgres directo (`package:postgres` / `Npgsql` / `pg` / `psycopg`). Si versión local ≠ activa → descarga + verifica sha256 + ejecuta en sandbox. Cada request lleva `<lang>_driver_version`+`<lang>_driver_entorno`; mismatch → `version_desactualizada`.
 
 Contrato del driver:
 - Lectura: `cargarMaestro`, `cargarDetalle`, `esGastos`, `cargarEmpresa`, `cargarFiscalVence`, `cargarSuplidorRncNombre`, `cargarTerceroExtranjero`, `cargarReferencia`, `contarOrigen`.

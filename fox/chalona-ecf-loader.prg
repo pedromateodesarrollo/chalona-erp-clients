@@ -31,22 +31,6 @@ Function chalonaSetConfig
   Return _ChalonaLoaderInit()
 Endfunc
 
-* chalonaSetDriver(loDriver) -> inyecta driver custom (Alberto / DBFs / etc).
-* Llamar antes o despues de chalonaSetConfig. Si goChalonaEcf ya existe,
-* aplica el driver en caliente. Sin esto, el motor crea ChalonaEcfDriverSqlServer.
-Function chalonaSetDriver
-  Lparameters toDriver
-  If Vartype(toDriver) # "O"
-    Return
-  Endif
-  Public goChalonaEcfDriver
-  goChalonaEcfDriver = toDriver
-  If Type("goChalonaEcf") = "O" And !Isnull(goChalonaEcf) ;
-      And Pemstatus(goChalonaEcf, "SetDriver", 5)
-    goChalonaEcf.SetDriver(toDriver)
-  Endif
-Endfunc
-
 * chalonaVersionCliente() -> version numerica del script cargado (0 si fallo la descarga)
 Function chalonaVersionCliente
   If !_ChalonaLoaderInit()
@@ -189,12 +173,6 @@ Function _ChalonaLoaderDescargar
   If Type("goChalonaEcfCfg") = "O" And !Isnull(goChalonaEcfCfg) ;
       And Pemstatus(loEcf, "SetConfig", 5)
     loEcf.SetConfig(goChalonaEcfCfg)
-  Endif
-
-  * Inyectar driver si chalonaSetDriver() fue llamada antes
-  If Type("goChalonaEcfDriver") = "O" And !Isnull(goChalonaEcfDriver) ;
-      And Pemstatus(loEcf, "SetDriver", 5)
-    loEcf.SetDriver(goChalonaEcfDriver)
   Endif
 
   AddProperty(loEcf, "source", lcBase + ".fxp")

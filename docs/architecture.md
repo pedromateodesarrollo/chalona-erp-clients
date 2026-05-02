@@ -34,6 +34,22 @@ POST /endpoint  doc + ver=9        →
 - **Auto-recuperación**: si un swap falla a mitad, el siguiente request lo
   cura. Sin estado huérfano.
 
+## Transporte: dos formas
+
+Las versiones del motor viven en Postgres, pero los clientes las consumen de
+dos maneras distintas según el lenguaje.
+
+| Cliente | Cómo accede al motor | Endpoint |
+|---|---|---|
+| Fox (VFP) | HTTP a server-ecf (Dart) que consulta Postgres | `POST /fox_cliente_script` |
+| Dart | Postgres directo via `package:postgres` | `data.dart_cliente_driver` |
+| C# / .NET | Postgres directo via `Npgsql` | `data.csharp_cliente_driver` |
+| TypeScript | Postgres directo via `pg` | `data.typescript_cliente_driver` |
+| Python | Postgres directo via `psycopg` | `data.python_cliente_driver` |
+
+VFP no tiene driver de Postgres ergonómico, por eso Fox pasa por HTTP. Los
+otros 4 lenguajes hablan SQL directo y evitan el salto.
+
 ## Almacenamiento
 
 Las dos tablas viven en la misma BD que el resto del backend. La versión
