@@ -1,119 +1,60 @@
 # Quickstart — Cliente Python
 
+## Audiencia
+
+Esta guía es para un **integrador** que quiere consumir el motor Python
+hot-reload publicado por Chalona desde una app Python. Tú no hospedás
+Postgres ni publicás nada — Chalona ya lo hizo. Tu app solo se conecta
+a la BD de Chalona y baja el driver.
+
+Si querés hospedar tu propio motor (forkear el patrón hot-reload para
+tu producto), saltá al final: [Self-hosting (avanzado)](#self-hosting-avanzado).
+
 ## Pre-requisitos
 
 - Python 3.9+
-- Postgres con el [schema](../sql/schema.sql) aplicado
-- `psql` en el PATH (loader y publisher lo usan)
+- `psql` en el PATH (loader lo usa para hablar Postgres sin deps)
+- Acceso de red a la BD Postgres de Chalona (host, port, db, user, pass —
+  provistos por Chalona)
 
-## Diferencia respecto a otros clientes
+**No necesitás aplicar schema ni publicar nada.** El motor vive en la BD
+de Chalona y se baja a tu app via lookup.
 
-`.pyc` (bytecode CPython) varía por versión de intérprete y plataforma, así
-que **se publica el `.py` source UTF-8**. El cliente lo ejecuta con `exec()`
-sobre un namespace `dict` aislado:
+## Mecanismo
 
-- El loader **inyecta** la clase base `ComprobanteDriver` al namespace antes
-  de `exec()`, para que el driver herede sin necesidad de importar el
-  paquete `chalona_driver` (importante: el cliente puede no tenerlo
-  instalado en su entorno).
+`.pyc` (bytecode CPython) varía por versión de intérprete y plataforma,
+así que **se publica el `.py` source UTF-8**. El cliente lo ejecuta con
+`exec()` sobre un namespace `dict` aislado:
+
+- El loader inyecta la clase base `ComprobanteDriver` al namespace antes
+  de `exec()` para que el driver herede sin importar `chalona_driver`.
 - Hot-swap = descartar el `dict` viejo y dejar que GC libere las clases.
-  Funciona porque CPython hace refcounting agresivo.
 - Dependencias del runtime: **cero**. Solo `psql` binary + Python stdlib.
 
-## Layout
-
-```
-python-driver/
-├── pyproject.toml
-├── publicar.sh                              # publisher CLI
-├── src/chalona_driver/
-│   ├── __init__.py
-│   ├── contract.py                          # ABC ComprobanteDriver
-│   ├── loader.py                            # DriverHandle.cargar() + cache
-│   ├── postgres_source.py                   # psql via subprocess
-│   └── compiler.py                          # validar AST + retornar bytes
-├── bin/
-│   ├── compilar.py                          # CLI: .py → bytes
-│   └── prueba_comprobantes_driver.py        # demo CLI: 9 casos
-└── driver_src/
-    └── driver_comprobantes.py               # driver con validación e-CF
-```
-
-## 1. Aplicar schema
-
-```bash
-psql -h localhost -U postgres -d midb -f ../sql/schema.sql
-```
-
-Crea `data.python_cliente_driver` + `fn.python_cliente_driver_lookup/descargar/publicar`.
-
-## 2. (Opcional) Instalar como paquete
+## 1. Instalar (opcional)
 
 ```bash
 cd python-driver
 pip install -e .
 ```
 
-No es obligatorio — los scripts en `bin/` añaden `src/` al `sys.path` automáticamente.
+No es obligatorio — los scripts en `bin/` añaden `src/` al `sys.path`
+automáticamente.
 
-## 3. Publicar el driver
-
-```bash
-PG_HOST=localhost PG_DB=midb PG_USER=postgres PG_PASS=secret \
-./publicar.sh
-```
-
-Esto:
-
-1. Valida sintaxis del `.py` con `ast.parse` (fail-fast).
-2. Lee bytes UTF-8.
-3. Calcula sha256.
-4. Llama `fn.python_cliente_driver_publicar` (verifica hash server-side).
-5. Inserta como versión activa en `entorno='test'`.
-
-Producción: `./publicar.sh --produccion`. Otra fuente: `./publicar.sh --fuente=driver_src/X.py`.
-
-## 4. Correr el cliente de prueba
-
-```bash
-PG_HOST=localhost PG_DB=midb PG_USER=postgres PG_PASS=secret ENTORNO=test \
-python3 bin/prueba_comprobantes_driver.py
-```
-
-Salida esperada:
-
-```
-== Lookup driver Python @ test (localhost:5432/midb)
-   activo: v1  3618 bytes  sha256=a60df21aa390...
-   cargado: instancia.version='v1'
-
-== Casos:
-   [OK  ] tipo 31 OK
-   [OK  ] tipo 32 OK monto bajo
-   [OK  ] tipo inválido errores=['tipo inválido: 99 (debe ser 31, 32, 33 o 34)']
-   ...
-
-9 pasaron, 0 fallaron
-```
-
-## 5. Hot-reload en acción
-
-Modifica `driver_src/driver_comprobantes.py`. Republica:
-
-```bash
-./publicar.sh
-```
-
-Re-corre el cliente — baja la versión nueva sin reinstalar.
-
-## Integrar en tu app
+## 2. Configurar conexión y usar
 
 ```python
 from chalona_driver import PostgresDriverSource, PgConn, DriverHandle
 
 source = PostgresDriverSource(
-    PgConn("localhost", 5432, "midb", "user", "pass"),
-    "produccion",
+    PgConn(
+        host="<host_provisto_por_chalona>",
+        port=5432,
+        database="<db_provista>",
+        user="<usuario_provisto>",
+        password="<clave_provista>",
+    ),
+    "test",   # o "produccion"
 )
 
 driver: DriverHandle | None = None
@@ -122,7 +63,7 @@ def validar_comprobante(doc: dict) -> bool:
     global driver
     meta = source.lookup()
     if meta is None:
-        raise RuntimeError("no driver")
+        raise RuntimeError("no driver activo")
 
     if driver is None or driver.version != f"v{meta.version}":
         bytes_drv = source.descargar()
@@ -134,17 +75,37 @@ def validar_comprobante(doc: dict) -> bool:
     return ok
 ```
 
-En producción agrega:
+En producción agregá: cache local en disco entre arranques (`DriverCache`
+en `loader.py`), retry con backoff, fallback al driver cacheado.
 
-- Cache local en disco entre arranques (`DriverCache` en `loader.py`)
-- Retry con backoff si lookup falla
-- Fallback al último driver cacheado si el server está caído
+## 3. Demo CLI
+
+```bash
+PG_HOST=<host> PG_DB=<db> PG_USER=<u> PG_PASS=<p> ENTORNO=test \
+  python3 bin/prueba_comprobantes_driver.py
+```
+
+Salida esperada:
+
+```
+== Lookup driver Python @ test
+   activo: v1  3618 bytes  sha256=a60df21aa390...
+   cargado: instancia.version='v1'
+
+== Casos:
+   [OK  ] tipo 31 OK
+   [OK  ] tipo 32 OK monto bajo
+   [OK  ] tipo invalido errores=['tipo invalido: 99 ...']
+   ...
+
+9 pasaron, 0 fallaron
+```
 
 ## Contrato del driver
 
-El driver descargado debe definir una clase que herede de `ComprobanteDriver`
-(la clase base se inyecta automáticamente al namespace por el loader — no
-hace falta importarla):
+El driver descargado define una clase que hereda de `ComprobanteDriver`
+(la clase base se inyecta al namespace por el loader — no hace falta
+importarla):
 
 ```python
 class MiDriver(ComprobanteDriver):  # type: ignore[name-defined]
@@ -153,41 +114,90 @@ class MiDriver(ComprobanteDriver):  # type: ignore[name-defined]
         return "v3"
 
     def pre_validar(self, c) -> tuple[bool, list[str]]:
-        # tu lógica
+        # logica
         return (True, [])
 ```
 
-El loader busca la primera clase concreta del namespace que sea subclase de
-`ComprobanteDriver` (excluyendo la base misma).
+El loader busca la primera clase concreta del namespace que sea subclase
+de `ComprobanteDriver`.
 
 ## Por qué `exec` y no `importlib`
 
-`importlib.util.spec_from_loader` requiere que el código viva en un módulo
-con nombre estable y registrado en `sys.modules`. `exec()` con un `dict`
-fresco es más simple para el caso "cargar este código en un sandbox y
+`importlib.util.spec_from_loader` requiere módulo con nombre estable en
+`sys.modules`. `exec()` con `dict` fresco es más simple para "cargar y
 descartar":
 
 - No contamina `sys.modules`.
-- GC libera el namespace cuando lo descartas.
+- GC libera el namespace cuando lo descartás.
 - Sin side-effects entre versiones.
 
 ## Seguridad
 
-`exec()` ejecuta código arbitrario con todos los privilegios del proceso
-host. Esto es **por diseño** — el código viene del servidor que ya
-controlas. No expongas `data.python_cliente_driver` a usuarios no
-confiables y revisa el SQL de `fn.python_cliente_driver_publicar`
-(solo `Interno` debería poder publicar).
-
-Para sandboxing real (drivers de terceros), considera `RestrictedPython` o
-correr el driver en un subprocess con seccomp/limits — fuera del scope
-del patrón loader simple.
+`exec()` ejecuta código arbitrario con privilegios del proceso host.
+Esto es **por diseño** — el código viene del servidor de Chalona que
+controla la publicación. Para drivers de terceros no confiables,
+considerar `RestrictedPython` o subprocess con seccomp/limits.
 
 ## Limitaciones
 
-- **No `.pyc`**: ship source. Visible en la BD si alguien consulta
+- **No `.pyc`**: ship source. Visible en BD si alguien consulta
   `data.python_cliente_driver.bytes`. Considéralo público.
-- **No hot-unload "real"**: depende de refcounting + GC. Funciona bien si
-  no guardas referencias largas a instancias del driver viejo.
-- **Imports estándar OK**: el driver puede `import json`, `import re`, etc.
-  Imports de paquetes terceros funcionan si están instalados en el cliente.
+- **No hot-unload "real"**: depende de refcounting + GC. Funciona si no
+  guardás referencias largas a instancias del driver viejo.
+- **Imports estándar OK**: el driver puede `import json`, `import re`,
+  etc. Imports de terceros funcionan si están instalados en el cliente.
+
+## Layout del cliente
+
+```
+python-driver/
+├── pyproject.toml
+├── publicar.sh                              # solo si self-hosting
+├── src/chalona_driver/
+│   ├── __init__.py
+│   ├── contract.py                          # ABC ComprobanteDriver
+│   ├── loader.py                            # DriverHandle.cargar() + cache
+│   ├── postgres_source.py                   # psql via subprocess
+│   └── compiler.py                          # validar AST + retornar bytes
+├── bin/
+│   ├── compilar.py                          # CLI: .py → bytes
+│   └── prueba_comprobantes_driver.py
+└── driver_src/                              # solo si self-hosting
+    └── driver_comprobantes.py
+```
+
+---
+
+## Self-hosting (avanzado)
+
+Solo si querés hospedar tu propio motor.
+
+### Pre-requisitos extra
+
+- Postgres con el [schema](../sql/schema.sql) aplicado
+
+### 1. Aplicar schema
+
+```bash
+psql -h localhost -U postgres -d midb -f ../sql/schema.sql
+```
+
+Crea `data.python_cliente_driver` + `fn.python_cliente_driver_lookup/descargar/publicar`.
+
+### 2. Publicar
+
+```bash
+PG_HOST=localhost PG_DB=midb PG_USER=postgres PG_PASS=secret \
+  ./publicar.sh
+```
+
+Valida sintaxis con `ast.parse`, lee bytes UTF-8, calcula sha256, llama
+`fn.python_cliente_driver_publicar`, inserta activo en `entorno='test'`.
+
+Producción: `./publicar.sh --produccion`. Otra fuente:
+`./publicar.sh --fuente=driver_src/X.py`.
+
+### 3. Hot-reload
+
+Modificá el driver fuente. Republicá. Próxima llamada del cliente baja
+versión nueva.

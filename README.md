@@ -88,69 +88,22 @@ Detalles + cómo invocarla en cada agente en
 
 Después decí `/driver-cliente` o "quiero integrar chalona con mi ERP".
 
-### Opción B — Manual
+### Opción B — Manual (consumir motor de Chalona)
 
-#### 1. Aplicar schema en Postgres
+Para integradores. **No requiere aplicar schema ni publicar nada** — el
+motor lo publica Chalona. Solo necesitás credenciales de acceso al server.
 
-```bash
-psql -h localhost -U postgres -d midb -f sql/schema.sql
-```
+| Cliente | Cómo se conecta | Doc |
+|---|---|---|
+| Fox | HTTP a server-ecf (Chalona) | [fox-quickstart.md](docs/fox-quickstart.md) |
+| Dart | Postgres directo (host/credenciales provistos por Chalona) | [dart-quickstart.md](docs/dart-quickstart.md) |
+| C# | Postgres directo | [csharp-quickstart.md](docs/csharp-quickstart.md) |
+| TypeScript | Postgres directo | [typescript-quickstart.md](docs/typescript-quickstart.md) |
+| Python | Postgres directo | [python-quickstart.md](docs/python-quickstart.md) |
 
-Crea las tablas `data.fox_cliente_script` y `data.dart_cliente_driver` más
-las funciones de lookup/descarga/publicación.
-
-#### 2. Cliente Fox
-
-Ver [docs/fox-quickstart.md](docs/fox-quickstart.md).
-
-```bash
-cd fox
-PG_HOST=localhost PG_DB=midb ./publicar.sh
-```
-
-#### 3. Cliente Dart
-
-Ver [docs/dart-quickstart.md](docs/dart-quickstart.md).
-
-```bash
-cd dart-driver
-dart pub get
-PG_HOST=localhost PG_DB=midb ./publicar.sh
-dart run bin/poc_postgres.dart
-```
-
-#### 4. Cliente C#
-
-Ver [docs/csharp-quickstart.md](docs/csharp-quickstart.md).
-
-```bash
-cd csharp
-dotnet build
-PG_HOST=localhost PG_DB=midb ./publicar.sh
-dotnet run --project src/ChalonaCsDriver.Cli
-```
-
-#### 5. Cliente TypeScript
-
-Ver [docs/typescript-quickstart.md](docs/typescript-quickstart.md).
-
-```bash
-cd typescript-driver
-PG_HOST=localhost PG_DB=midb ./publicar.sh
-PG_HOST=localhost PG_DB=midb ENTORNO=test \
-  node dist/bin/prueba-comprobantes-driver.js
-```
-
-#### 6. Cliente Python
-
-Ver [docs/python-quickstart.md](docs/python-quickstart.md).
-
-```bash
-cd python-driver
-PG_HOST=localhost PG_DB=midb ./publicar.sh
-PG_HOST=localhost PG_DB=midb ENTORNO=test \
-  python3 bin/prueba_comprobantes_driver.py
-```
+Cada quickstart incluye al final una sección "Self-hosting (avanzado)"
+para quien quiera correr su propio motor (forkear el patrón). Caso
+típico: NO necesario para integradores Chalona.
 
 ## Arquitectura
 
@@ -242,39 +195,22 @@ mkdir -p .claude/skills/driver-cliente \
 
 Then: `/driver-cliente` or "I want to integrate chalona with my ERP".
 
-### Option B — Manual
+### Option B — Manual (consume Chalona's engine)
 
-```bash
-# 1. Apply schema
-psql -h localhost -U postgres -d mydb -f sql/schema.sql
+For integrators. **No need to apply schema or publish anything** —
+Chalona publishes the engine. You just need server credentials.
 
-# 2. Publish a driver (Fox)
-cd fox && PG_HOST=localhost PG_DB=mydb ./publicar.sh
+| Client | Connects via | Doc |
+|---|---|---|
+| Fox | HTTP to Chalona's server-ecf | [fox-quickstart.md](docs/fox-quickstart.md) |
+| Dart | Direct Postgres (host/creds provided by Chalona) | [dart-quickstart.md](docs/dart-quickstart.md) |
+| C# | Direct Postgres | [csharp-quickstart.md](docs/csharp-quickstart.md) |
+| TypeScript | Direct Postgres | [typescript-quickstart.md](docs/typescript-quickstart.md) |
+| Python | Direct Postgres | [python-quickstart.md](docs/python-quickstart.md) |
 
-# 3. Publish a driver (Dart)
-cd dart-driver && dart pub get
-PG_HOST=localhost PG_DB=mydb ./publicar.sh
-dart run bin/poc_postgres.dart
-
-# 4. Publish a driver (C#)
-cd csharp && dotnet build
-PG_HOST=localhost PG_DB=mydb ./publicar.sh
-dotnet run --project src/ChalonaCsDriver.Cli
-
-# 5. Publish a driver (TypeScript)
-cd typescript-driver
-PG_HOST=localhost PG_DB=mydb ./publicar.sh
-PG_HOST=localhost PG_DB=mydb ENTORNO=test \
-  node dist/bin/prueba-comprobantes-driver.js
-
-# 6. Publish a driver (Python)
-cd python-driver
-PG_HOST=localhost PG_DB=mydb ./publicar.sh
-PG_HOST=localhost PG_DB=mydb ENTORNO=test \
-  python3 bin/prueba_comprobantes_driver.py
-```
-
-See [`docs/`](docs/) for details and trade-offs.
+Each quickstart ends with a "Self-hosting (advanced)" section for
+forking the hot-reload pattern to host your own engine. Typically NOT
+needed for Chalona integrators.
 
 ## License
 
