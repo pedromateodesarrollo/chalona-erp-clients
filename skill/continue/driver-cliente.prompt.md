@@ -1,0 +1,229 @@
+# driver-cliente — Integrar Chalona ECF con tu ERP
+
+Selecciona el cliente que mejor encaja, descarga sólo eso del repo público, diseña queries contra las tablas reales del ERP, genera el driver concreto.
+
+Triggers: "quiero integrar chalona", "instalar cliente chalona", "cómo conecto mi sistema con DGII", "tengo SQL Server / MySQL / DBF / Mongo".
+
+
+# /driver-cliente — Integración guiada con Chalona ECF
+
+Esta skill ayuda a un integrador a integrar **su ERP** con la plataforma Chalona ECF (facturación electrónica DGII República Dominicana).
+
+Aplicar las **cuatro fases** en orden. No avanzar a la siguiente sin completar la anterior.
+
+0. **Selección, descarga, instalación** — elegir lenguaje y traer el cliente al proyecto del integrador.
+1. **Explicar arquitectura** — qué es el motor, qué es el driver, hot-reload, contrato.
+2. **Levantar requisitos** — preguntar progresivamente sobre BD y tablas del ERP.
+3. **Generar el driver concreto** — sustituir queries scaffolded con los nombres reales del integrador.
+
+## Fase 0 — Selección, descarga, instalación
+
+### 0.1 Preguntar entorno del integrador
+
+Antes de descargar nada:
+
+1. ¿En qué **lenguaje** corre tu ERP? (o el componente que se va a integrar)
+   - Visual FoxPro → `fox/`
+   - Dart / Flutter → `dart-driver/`
+   - C# / .NET → `csharp/`
+   - Node.js / TypeScript → `typescript-driver/`
+   - Python → `python-driver/`
+   - Otro (Java, Go, Ruby, PHP, Rust, …) → driver nuevo, ver fase 0.4
+2. ¿Qué **base de datos** usa tu ERP? (SQL Server, PostgreSQL, MySQL, Oracle, DBF, MongoDB, REST API, otro)
+3. ¿Tienes ya un repositorio donde vivirá la integración? Pedir ruta absoluta.
+
+Confirmar la elección antes de descargar.
+
+### 0.2 Descargar el cliente (lenguaje ya soportado)
+
+Descargar **solo la subcarpeta** del lenguaje elegido + `sql/` desde el repo público (sparse checkout para evitar bajar lenguajes que no se usan):
+
+```bash
+# Variables (reemplazar)
+LANG_DIR=<fox|dart-driver|csharp|typescript-driver|python-driver>
+DEST=<ruta-absoluta-del-proyecto-del-integrador>
+
+cd /tmp
+git clone --depth 1 --filter=blob:none --sparse \
+  https://github.com/pedromateodesarrollo/chalona-erp-clients.git
+cd chalona-erp-clients
+git sparse-checkout set "$LANG_DIR" sql docs LICENSE
+
+mkdir -p "$DEST/chalona-ecf"
+cp -r "$LANG_DIR" "$DEST/chalona-ecf/"
+cp -r sql        "$DEST/chalona-ecf/"
+cp -r docs       "$DEST/chalona-ecf/"
+cp LICENSE       "$DEST/chalona-ecf/"
+```
+
+Confirmar con el integrador antes de ejecutar (rutas, repo destino).
+
+### 0.3 Aplicar schema en su Postgres
+
+```bash
+psql -h <host> -U <user> -d <db> -f "$DEST/chalona-ecf/sql/schema.sql"
+```
+
+Crea tablas y funciones de lookup/descarga/publicación de drivers. Idempotente.
+
+### 0.4 Lenguaje no soportado — driver nuevo
+
+Si el lenguaje no está en la lista, hay que sumar el lenguaje al sistema. Avisar al integrador que esto es trabajo extra y requiere coordinación con el equipo Chalona:
+
+1. Decidir mecanismo runtime (bytecode portable, source interpretado, assembly cargable).
+2. Crear `data.<lang>_cliente_driver` + 3 fns + extender `fn.ejecutar`.
+3. Implementar loader fijo + sandbox del runtime + verificación sha256.
+4. Implementar compilador (source → bytes para BD).
+5. Implementar publicador con `--produccion`/test.
+6. CLI test 9 casos pos/neg con fixture compartida cross-lang.
+
+Solo después de eso se pueden seguir las fases 1–3 normales. Coordinar con Chalona antes de empezar.
+
+## Fase 1 — Explicar arquitectura
+
+Solo si el integrador no está familiarizado.
+
+### Dos piezas
+
+**Motor del cliente** (lo escribe Chalona, vive en BD, hot-reload):
+- Construye el e-CF
+- Pre-valida (tipo, fecha, RNC, monto, tope NC, manual RFCE)
+- Envía a DGII y procesa respuesta
+- Hace sync masivo
+- Versiones por entorno (`test` / `produccion`); cliente envía `*_driver_version` y server rechaza si está desactualizado
+
+**Driver de datos** (lo escribe el integrador, vive en su ERP):
+- Implementa contrato fijo en su lenguaje
+- Lee maestro/detalle/empresa/suplidores/referencias **de las tablas del ERP**
+- Escribe respuesta DGII (encf, estado, timbre, codigo_seguridad, fecha_firma) **a las tablas del ERP**
+- Lock + lista pendientes + lista duplicados para sync
+
+### Hot-reload
+
+- `data.<lang>_cliente_driver` guarda bytes del motor + sha256
+- Cliente: lookup → si versión ≠ activa, descarga + verifica sha + ejecuta en sandbox
+- Cada request al server lleva `<lang>_driver_version` + `<lang>_driver_entorno`; mismatch → `version_desactualizada`
+
+El driver del integrador NO se publica a Chalona — vive en su código.
+
+### Contrato del driver
+
+Lectura: `cargarMaestro`, `cargarDetalle`, `esGastos`, `cargarEmpresa`, `cargarFiscalVence`, `cargarSuplidorRncNombre`, `cargarTerceroExtranjero`, `cargarReferencia`, `contarOrigen`.
+
+Escritura: `guardarRespuestaEnvio`, `marcarErrorEnvio`.
+
+Sync masivo: `syncIntentarLock`, `syncLiberarLock`, `syncListarPendientes`, `syncListarDuplicados`.
+
+Driver de referencia documentado: `chalona-ecf/fox/chalona-ecf-driver-default.prg` (cabecera tiene contrato canónico). `chalona-ecf/fox/alberto/alberto-ecf-driver.prg` muestra cómo sustituir SQL Server por DBF.
+
+## Fase 2 — Levantamiento (preguntas en orden)
+
+Hacer preguntas en bloques pequeños. Registrar respuestas. No repreguntar lo ya contestado.
+
+### Bloque A — Lenguaje y runtime
+1. Lenguaje del driver (confirmar fase 0)
+2. ¿ERP de proceso largo (servidor) o desktop multi-usuario?
+
+### Bloque B — Base de datos
+3. Motor BD (SQL Server / Postgres / MySQL / Oracle / DBF / SQLite / Mongo / REST / otro)
+4. Cómo se conecta hoy (cadena, ODBC, ORM)
+5. ¿Capa de query reutilizable o conexión directa?
+
+### Bloque C — Maestro de documentos
+6. Tabla(s) de **comprobantes de venta** + columna "control" (clave de negocio)
+7. Tabla(s) de **comprobantes de compra / gastos**
+8. Cómo distinguir venta de gasto (tablas separadas o flag)
+9. Columnas del maestro de venta equivalentes a:
+   - fecha del documento
+   - rnc/ID cliente
+   - nombre cliente
+   - dirección
+   - tipo (31/32/33/34) — guardado o deducido
+   - monto total, itbis, descuento, retenciones, propina
+   - moneda, tasa de cambio
+   - referencia a factura previa (para NC/ND)
+10. Misma lista para gastos.
+
+### Bloque D — Detalle de líneas
+11. Tabla de líneas. Columnas mínimas: cantidad, precio, descripción, servicio (0=mercancía / 1=servicio / 2=otro), indicador de facturación, itbis_retenido (opt), isr_retenido (opt).
+
+### Bloque E — Maestros auxiliares
+12. Tabla empresa emisora (rnc, nombre, dirección)
+13. Tabla clientes (rnc + nombre + flag extranjero por código)
+14. Tabla suplidores (rnc + nombre + flag extranjero)
+15. Secuencias fiscales — fecha vencimiento por tipo (31, 32, 33, 34)
+
+### Bloque F — Referencias (NC/ND)
+16. Cómo se enlaza NC/ND con factura original (columna que apunta al "control" referenciado)
+
+### Bloque G — Escritura respuesta DGII
+17. Dónde persistir encf/ncf devuelto (columna existe? hay que añadirla?)
+18. Campos adicionales: timbre, codigo_seguridad, fecha_firma, estado, estado_descripcion, momento, secuencia_utilizada
+19. Errores: tabla aparte o columna en maestro?
+
+### Bloque H — Sync masivo
+20. Locks hoy (advisory Postgres, sp_getapplock SQL Server, file lock, ...)
+21. Cómo identificar registros pendientes (estado/columna + condición)
+
+Al terminar, **resumir respuestas y confirmar antes de generar código**.
+
+## Fase 3 — Generar driver concreto
+
+Producir el driver en el lenguaje del integrador con:
+
+- Clase + contrato completo (todos los métodos lectura/escritura/sync)
+- Queries reales con los nombres de tablas/columnas del integrador
+- `TODO:` solo donde falte dato o haya decisión pendiente del integrador
+- Imports/dependencias mínimas
+
+Patrón base:
+
+```
+Class <Nombre>EcfDriver {
+
+  // === LECTURA ===
+  cargarMaestro(control)      { ... query a <tabla_maestro_venta> ... }
+  cargarDetalle(control)      { ... }
+  esGastos(control)           { ... }
+  cargarEmpresa()             { ... }
+  cargarFiscalVence(tipoEcf)  { ... }
+  cargarSuplidorRncNombre(c)  { ... }
+  cargarTerceroExtranjero(c, esGastos) { ... }
+  cargarReferencia(ocontrol)  { ... }
+  contarOrigen(control)       { ... }
+
+  // === ESCRITURA ===
+  guardarRespuestaEnvio(control, data, esGastos) { ... UPDATE/INSERT ... }
+  marcarErrorEnvio(control, mensaje, esGastos)   { ... }
+
+  // === SYNC MASIVO ===
+  syncIntentarLock()       { ... }
+  syncLiberarLock()        { ... }
+  syncListarPendientes()   { ... }
+  syncListarDuplicados()   { ... }
+}
+```
+
+Lenguaje ya soportado: apuntar al driver de referencia y sustituir queries.
+
+Lenguaje nuevo: ya quedó cubierto en fase 0.4.
+
+## Reglas operativas
+
+- **Idioma**: español por defecto, salvo que el integrador escriba en otro idioma.
+- **No inventar** nombres de tabla/columna. Falta dato → `TODO:` y seguir.
+- **No asumir** motor de BD: hasta no preguntar, no escribir SQL.
+- **No mezclar** driver con motor: validación tipo 32, fechas, tope NC, etc. lo hace el motor. Si el integrador pregunta por eso, redirigir.
+- **Recordar Fase 1 DGII**: tipo 32 (Consumo) NO usa polling asíncrono. Si el integrador propone polling de estado en 32, advertir.
+- **Confirmar BD destino antes de publicar** lógica de motor: declarar `test` o `produccion` y esperar `go`.
+- **No ejecutar** `git clone`, `cp -r` o `psql` sin confirmación explícita del integrador (rutas + credenciales).
+
+## Referencias
+
+- Repo público: https://github.com/pedromateodesarrollo/chalona-erp-clients
+- Driver Fox de referencia (contrato canónico documentado): `chalona-ecf/fox/chalona-ecf-driver-default.prg`
+- Driver Alberto (DBF, ejemplo de sustitución backing store): `chalona-ecf/fox/alberto/alberto-ecf-driver.prg`
+- Manual integración Fox: `chalona-ecf/fox/chalona-ecf-integracion.html`
+- Manual API REST Alberto: `chalona-ecf/fox/alberto/manual-api-rest.html`
+- Quickstarts por lenguaje: `chalona-ecf/docs/<lang>-quickstart.md`
+- Arquitectura: `chalona-ecf/docs/architecture.md`

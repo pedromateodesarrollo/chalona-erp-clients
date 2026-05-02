@@ -57,9 +57,40 @@ data.
 | [`sql/`](sql/) | Schema Postgres standalone (tablas + funciones) |
 | [`docs/`](docs/) | Arquitectura, quickstarts, limitaciones |
 
-## Quickstart
+## Cómo empezar
 
-### 1. Aplicar schema en Postgres
+### Opción A — Asistido por agente de IA (recomendado)
+
+Instalá la skill **`driver-cliente`** en tu agente y dejá que él:
+
+1. Te pregunte tu lenguaje y motor de BD.
+2. Descargue **solo** el cliente que te conviene de este repo.
+3. Te lleve por las preguntas de diseño (clientes, facturas, compras,
+   suplidores, escritura de respuesta DGII).
+4. Genere el driver concreto con queries scaffolded contra **tus** tablas.
+
+Instalación según tu agente (una sola línea desde la raíz de tu repo):
+
+| Agente | Comando |
+|---|---|
+| Claude Code | `mkdir -p .claude/skills/driver-cliente && curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/driver-cliente/SKILL.md -o .claude/skills/driver-cliente/SKILL.md` |
+| Cursor | `mkdir -p .cursor/rules && curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/cursor/driver-cliente.mdc -o .cursor/rules/driver-cliente.mdc` |
+| Windsurf | `curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/windsurf/.windsurfrules -o .windsurfrules` |
+| GitHub Copilot | `mkdir -p .github && curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/copilot/copilot-instructions.md -o .github/copilot-instructions.md` |
+| Copilot Chat | `mkdir -p .github/prompts && curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/copilot-prompts/driver-cliente.prompt.md -o .github/prompts/driver-cliente.prompt.md` |
+| Aider | `curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/aider/CONVENTIONS.md -o CONVENTIONS.md` |
+| Continue.dev | `mkdir -p .continue/prompts && curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/continue/driver-cliente.prompt.md -o .continue/prompts/driver-cliente.prompt.md` |
+| Cline | `curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/cline/.clinerules -o .clinerules` |
+| Zed | `mkdir -p .zed && curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/zed/driver-cliente.md -o .zed/driver-cliente.md` |
+
+Detalles + cómo invocarla en cada agente en
+[docs/install-skill.md](docs/install-skill.md).
+
+Después decí `/driver-cliente` o "quiero integrar chalona con mi ERP".
+
+### Opción B — Manual
+
+#### 1. Aplicar schema en Postgres
 
 ```bash
 psql -h localhost -U postgres -d midb -f sql/schema.sql
@@ -68,7 +99,7 @@ psql -h localhost -U postgres -d midb -f sql/schema.sql
 Crea las tablas `data.fox_cliente_script` y `data.dart_cliente_driver` más
 las funciones de lookup/descarga/publicación.
 
-### 2. Cliente Fox
+#### 2. Cliente Fox
 
 Ver [docs/fox-quickstart.md](docs/fox-quickstart.md).
 
@@ -77,7 +108,7 @@ cd fox
 PG_HOST=localhost PG_DB=midb ./publicar.sh
 ```
 
-### 3. Cliente Dart
+#### 3. Cliente Dart
 
 Ver [docs/dart-quickstart.md](docs/dart-quickstart.md).
 
@@ -88,7 +119,7 @@ PG_HOST=localhost PG_DB=midb ./publicar.sh
 dart run bin/poc_postgres.dart
 ```
 
-### 4. Cliente C#
+#### 4. Cliente C#
 
 Ver [docs/csharp-quickstart.md](docs/csharp-quickstart.md).
 
@@ -99,7 +130,7 @@ PG_HOST=localhost PG_DB=midb ./publicar.sh
 dotnet run --project src/ChalonaCsDriver.Cli
 ```
 
-### 5. Cliente TypeScript
+#### 5. Cliente TypeScript
 
 Ver [docs/typescript-quickstart.md](docs/typescript-quickstart.md).
 
@@ -110,7 +141,7 @@ PG_HOST=localhost PG_DB=midb ENTORNO=test \
   node dist/bin/prueba-comprobantes-driver.js
 ```
 
-### 6. Cliente Python
+#### 6. Cliente Python
 
 Ver [docs/python-quickstart.md](docs/python-quickstart.md).
 
@@ -189,7 +220,29 @@ No polling. No push notifications. No installers. Logic ships with data.
 | `sql/` | Standalone Postgres schema (tables + functions) |
 | `docs/` | Architecture, quickstarts, limitations |
 
-## Quickstart
+## Getting started
+
+### Option A — AI-agent assisted (recommended)
+
+Install the **`driver-cliente`** skill into your AI agent of choice and let
+it pick + download the right client, walk you through design questions, and
+scaffold a driver against **your** tables.
+
+Supported: Claude Code, Cursor, Windsurf, GitHub Copilot, Copilot Chat,
+Aider, Continue.dev, Cline, Zed. See full per-agent install commands in
+[docs/install-skill.md](docs/install-skill.md).
+
+Quick install for Claude Code:
+
+```bash
+mkdir -p .claude/skills/driver-cliente \
+  && curl -fsSL https://raw.githubusercontent.com/pedromateodesarrollo/chalona-erp-clients/main/skill/driver-cliente/SKILL.md \
+       -o .claude/skills/driver-cliente/SKILL.md
+```
+
+Then: `/driver-cliente` or "I want to integrate chalona with my ERP".
+
+### Option B — Manual
 
 ```bash
 # 1. Apply schema
