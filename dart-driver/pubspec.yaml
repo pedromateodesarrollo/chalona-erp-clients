@@ -1,0 +1,18 @@
+name: chalona_dart_driver
+description: >-
+  Cliente Dart para Chalona ERP con hot-reload de lógica vía dart_eval.
+  Patrón loader: bytecode .evc descargado desde Postgres, hash-verificado
+  y ejecutado en runtime. Sin recompilar la app cada vez que cambia la lógica.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.4.0
+
+dependencies:
+  dart_eval: ^0.8.4
+  crypto: ^3.0.3
+  postgres: ^3.1.0
+
+dev_dependencies:
+  lints: ^4.0.0

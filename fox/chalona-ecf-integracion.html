@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Chalona ECF · Cliente Fox · Guía de integración</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --bg: #fafafa;
+    --muted: #666;
+    --accent: #0a5;
+    --accent-dark: #074;
+    --border: #ddd;
+    --code-bg: #f4f4f4;
+    --code-fg: #333;
+    --warn: #c83;
+    --danger: #c33;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    margin: 0;
+    line-height: 1.5;
+    font-size: 15px;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+  nav {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 24px 16px;
+    border-right: 1px solid var(--border);
+    background: #fff;
+    font-size: 13px;
+  }
+  nav h1 { font-size: 15px; margin: 0 0 12px; color: var(--accent-dark); }
+  nav ul { list-style: none; padding: 0; margin: 0; }
+  nav > ul > li { margin-bottom: 4px; }
+  nav ul ul { padding-left: 12px; margin-top: 2px; }
+  nav a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 3px 6px;
+    border-radius: 3px;
+  }
+  nav a:hover { background: #eef; }
+  nav a.lvl2 { color: var(--muted); font-size: 12px; }
+  main {
+    padding: 32px 48px;
+    max-width: 920px;
+  }
+  h1, h2, h3, h4 { color: var(--accent-dark); }
+  h1 { font-size: 28px; margin-top: 0; }
+  h2 { font-size: 22px; margin-top: 40px; padding-bottom: 6px; border-bottom: 2px solid var(--accent); }
+  h3 { font-size: 18px; margin-top: 28px; }
+  h4 { font-size: 16px; margin-top: 20px; color: var(--fg); }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; font-size: 13px; color: var(--code-fg); }
+  pre {
+    background: #1e1e1e;
+    color: #e0e0e0;
+    padding: 14px 18px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  .kw { color: #569cd6; }
+  .str { color: #ce9178; }
+  .num { color: #b5cea8; }
+  .com { color: #6a9955; font-style: italic; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 14px 0;
+    font-size: 14px;
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { background: #eee; font-weight: 600; }
+  tr:hover td { background: #f5f5f5; }
+  .note, .warn, .danger {
+    border-left: 4px solid var(--accent);
+    background: #f0f8f4;
+    padding: 10px 14px;
+    margin: 14px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .warn { border-color: var(--warn); background: #fdf6ec; }
+  .danger { border-color: var(--danger); background: #fdecec; }
+  .note strong, .warn strong, .danger strong { display: block; margin-bottom: 4px; }
+  .pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .toc-item-method { font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+  .small { color: var(--muted); font-size: 13px; }
+  ul.tight li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav>
+  <h1>Chalona ECF · Cliente Fox</h1>
+  <ul>
+    <li><a href="#resumen">1. Resumen</a></li>
+    <li><a href="#arquitectura">2. Arquitectura</a></li>
+    <li><a href="#instalacion">3. Instalación y carga</a>
+      <ul>
+        <li><a href="#hot-reload" class="lvl2">3.1 Loader / hot-reload</a></li>
+        <li><a href="#config" class="lvl2">3.2 Configuración (objeto Cfg)</a></li>
+      </ul>
+    </li>
+    <li><a href="#uso">4. Uso básico</a></li>
+    <li><a href="#api">5. API pública</a>
+      <ul>
+        <li><a href="#api-properties" class="lvl2">5.1 Properties</a></li>
+        <li><a href="#api-init" class="lvl2 toc-item-method">Init</a></li>
+        <li><a href="#api-setconfig" class="lvl2 toc-item-method">SetConfig</a></li>
+        <li><a href="#api-setdriver" class="lvl2 toc-item-method">SetDriver</a></li>
+        <li><a href="#api-enviar" class="lvl2 toc-item-method">Enviar</a></li>
+        <li><a href="#api-consultar" class="lvl2 toc-item-method">ConsultarEstado</a></li>
+        <li><a href="#api-sync" class="lvl2 toc-item-method">SincronizarEstadosEnProceso</a></li>
+        <li><a href="#api-descargar" class="lvl2 toc-item-method">DescargarDocumentos</a></li>
+      </ul>
+    </li>
+    <li><a href="#driver">6. Contrato del driver</a>
+      <ul>
+        <li><a href="#driver-cursores" class="lvl2">6.1 Shape de cursores</a></li>
+        <li><a href="#driver-metodos" class="lvl2">6.2 Métodos</a></li>
+        <li><a href="#driver-vfp" class="lvl2">6.3 Notas VFP</a></li>
+      </ul>
+    </li>
+    <li><a href="#default">7. Driver default (SQL Server)</a></li>
+    <li><a href="#custom">8. Cómo escribir un driver custom</a>
+      <ul>
+        <li><a href="#alberto" class="lvl2">8.1 Caso real: Alberto (DBFs)</a></li>
+      </ul>
+    </li>
+    <li><a href="#endpoints">9. Endpoints HTTP del backend</a></li>
+    <li><a href="#errores">10. Manejo de errores</a></li>
+    <li><a href="#troubleshooting">11. Troubleshooting</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<h1>Chalona ECF · Cliente Fox <span class="pill">v1.0</span></h1>
+
+<p class="small">Guía de integración del cliente Visual FoxPro <code>chalona-ecf.prg</code>
+con ERPs propios. Última revisión: abril 2026.</p>
+
+<!-- ===================================================================== -->
+<h2 id="resumen">1. Resumen</h2>
+
+<p><code>chalona-ecf.prg</code> es la librería VFP que integra un ERP Fox con el
+servicio Chalona ECF (e-CF DGII República Dominicana). Encapsula:</p>
+<ul>
+  <li>Login en el servidor (JWT Bearer).</li>
+  <li>Construcción del JSON DGII (encabezado, totales, detalle, retención, multimoneda).</li>
+  <li>Envío al endpoint <code>envia_ecf</code>.</li>
+  <li>Consulta de estado por e-NCF.</li>
+  <li>Sincronización masiva de comprobantes "en proceso" con <code>sp_getapplock</code>.</li>
+  <li>Descarga de documentos por rango de fechas (zip).</li>
+  <li>Manejo de errores con formulario opcional (<code>ChalonaFormErrorEnvioEcf</code>).</li>
+</ul>
+
+<p>El acceso a datos del ERP está abstraído tras un <strong>driver inyectable</strong>.
+El driver por defecto (<code>ChalonaEcfDriverSqlServer</code>) lee de
+<code>dbo.imtr</code>, <code>dbo.gastos</code>, <code>dbo.imtrd</code>, etc. mediante
+la función global <code>Request()</code>. Otros ERPs implementan su propio driver
+con la misma interfaz (VFP es duck-typed; no se hereda nada).</p>
+
+<div class="note">
+<strong>TL;DR para integrarse</strong>
+<ol class="tight">
+  <li>Escribir una clase con los métodos del <a href="#driver">contrato del driver</a>.</li>
+  <li><code>loEcf = Createobject("ChalonaEcf")</code>.</li>
+  <li><code>loEcf.SetDriver(Createobject("MiEcfDriver"))</code>.</li>
+  <li><code>loEcf.Enviar(tcControl)</code>.</li>
+</ol>
+</div>
+
+<!-- ===================================================================== -->
+<h2 id="arquitectura">2. Arquitectura</h2>
+
+<pre><code>+-----------------------+         +--------------------------+
+|     ERP del cliente    |  HTTP   |   Servidor Chalona ECF   |
+|   (VFP + DBF / SQL)    | <-----> |  (Dart server_ecf)       |
++-----------------------+         +--------------------------+
+        |
+        | Createobject("ChalonaEcf"); .SetDriver(); .Enviar()
+        v
++----------------------------------+
+|        chalona-ecf.prg           |
+|                                   |
+|  +----------------------------+  |
+|  |  ChalonaEcf (motor)        |  |
+|  |   - Login JWT              |  |
+|  |   - HTTP POST envia_ecf    |  |
+|  |   - Manejo de errores      |  |
+|  +-------------+--------------+  |
+|                |                  |
+|                | usa              |
+|                v                  |
+|  +----------------------------+  |
+|  | ChalonaEcfBuildDocJsonFox  |  |
+|  | (función global)            |  |
+|  | construye JSON DGII         |  |
+|  +-------------+--------------+  |
+|                |                  |
+|                | toDriver.X()    |
+|                v                  |
+|  +----------------------------+  |
+|  |   Driver (interfaz)         |  |
+|  |  CargarMaestro / Detalle /  |  |
+|  |  Empresa / Suplidor / etc.  |  |
+|  +-------------+--------------+  |
+|        ^                ^        |
+|        |                |        |
+|  default          custom         |
+|        |                |        |
+|  +-----+----+    +------+-----+ |
+|  | Driver   |    | Driver     | |
+|  | SqlServer|    | Alberto    | |
+|  | (dbo.*)  |    | (DBFs)     | |
+|  +----------+    +------------+ |
++----------------------------------+</code></pre>
+
+<p>Entradas del motor:</p>
+<ul class="tight">
+  <li><code>ChalonaEcf.Enviar(tcControl)</code> es el punto principal.</li>
+  <li>El motor llama a <code>This.Driver.MetodoX()</code> y <strong>nunca
+    accede directamente a tablas <code>dbo.*</code> ni DBFs</strong>.</li>
+  <li><code>tcControl</code> es opaco para el motor: el driver lo decodifica
+    como quiera (id numérico, JSON, "tipo|numero", etc.).</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="instalacion">3. Instalación y carga</h2>
+
+<p>Archivos físicos:</p>
+<table>
+<tr><th>Archivo</th><th>Rol</th></tr>
+<tr><td><code>chalona-ecf.prg</code></td>
+    <td>Motor + driver default (SQL Server) + helpers + clases UI.</td></tr>
+<tr><td><code>chalona-ecf-loader.prg</code></td>
+    <td>Loader: descarga la versión activa de
+        <code>data.fox_cliente_script</code> y la compila como temporal
+        para hot-reload.</td></tr>
+<tr><td><code>chalona-ecf-driver-default.prg</code></td>
+    <td>Plantilla standalone del driver default. <strong>Sólo referencia</strong>
+        — el driver ya viene embebido en <code>chalona-ecf.prg</code>.
+        Útil para clonar y adaptar.</td></tr>
+</table>
+
+<h3 id="hot-reload">3.1 Loader / hot-reload</h3>
+
+<p>El cliente productivo carga <code>chalona-ecf-loader.prg</code>, no el
+<code>.prg</code> directo. El loader:</p>
+<ol>
+  <li>Consulta <code>data.fox_cliente_script</code> en el backend
+    (filtrando por <code>entorno</code> según <code>portal_dgii</code>:
+    <em>testecf</em> &rarr; <code>entorno='test'</code>;
+    <em>ecf</em> &rarr; <code>entorno='produccion'</code>).</li>
+  <li>Escribe el script activo a un archivo temporal único.</li>
+  <li>Hace <code>SET PROCEDURE TO &lt;tmp&gt;.fxp ADDITIVE</code>.</li>
+  <li>El ERP llama <code>Createobject("ChalonaEcf")</code> y todo carga.</li>
+</ol>
+
+<p>Publicar una versión nueva (desarrolladores Chalona):</p>
+<pre><code><span class="com"># entorno=test (default)</span>
+./scripts/actualiza-cliente-fox.sh
+
+<span class="com"># entorno=produccion</span>
+./scripts/actualiza-cliente-fox.sh --produccion</code></pre>
+
+<div class="warn">
+<strong>Nota de despliegue</strong>
+La tabla <code>data.fox_cliente_script</code> vive siempre en la BD
+producción (<code>localhost:5432/produccion</code>). El flag <code>entorno</code>
+es lo que decide qué ERPs reciben qué versión. Esto se ha pagado caro al
+publicar v11 a 5433 cuando debía ir a 5432; el script ya no acepta esa
+ambigüedad.
+</div>
+
+<h3 id="config">3.2 Configuración (objeto Cfg)</h3>
+
+<p>El motor es agnóstico al ERP host: opera contra un objeto de configuración
+con propiedades de tipo cadena. La configuración se inyecta de dos formas:</p>
+
+<ol class="tight">
+  <li><strong>ERPs con <code>Public osis</code> (Vicortiz)</strong>: no se hace
+      nada. <code>Init</code> llama <code>ChalonaEcfConfigDesdeOsis()</code>
+      automáticamente y arma el objeto.</li>
+  <li><strong>ERPs sin <code>osis</code> (Alberto / otros)</strong>: el ERP
+      construye el objeto y lo inyecta vía
+      <code>chalonaSetConfig(loCfg)</code> (loader) o
+      <code>loEcf.SetConfig(loCfg)</code> (motor) <em>antes</em> de cualquier
+      operación.</li>
+</ol>
+
+<p>Propiedades esperadas en el objeto:</p>
+
+<table>
+<tr><th>Propiedad</th><th>Uso</th><th>Ejemplo</th></tr>
+<tr><td><code>servidor_ecf</code></td><td>URL base del servidor (override)</td>
+    <td><code>https://ecf-service.vicortiz.com/</code></td></tr>
+<tr><td><code>usuario_sync</code></td><td>Email de login del API</td>
+    <td><code>user131086268@vicortiz.com</code></td></tr>
+<tr><td><code>pass_sync</code></td><td>Clave del API</td><td>—</td></tr>
+<tr><td><code>portal_dgii</code></td><td>Portal DGII</td>
+    <td><code>testecf</code> | <code>ecf</code></td></tr>
+<tr><td><code>dgii_multimoneda</code></td><td>Si <code>"T"</code>, activa bloque
+    <code>OtraMoneda</code> cuando <code>imtr.moneda</code> es divisa
+    extranjera y <code>imtr.tasa &gt; 1</code></td>
+    <td><code>T</code> / <code>F</code></td></tr>
+</table>
+
+<p>Si no se inyecta cfg ni hay <code>osis</code>, el loader cae a su URL
+hardcoded (<code>https://ecf-service.vicortiz.com/</code>) y entorno
+<code>produccion</code>; las credenciales quedan vacías y el login fallará.</p>
+
+<!-- ===================================================================== -->
+<h2 id="uso">4. Uso básico</h2>
+
+<p>Registrar el loader una sola vez al arrancar el ERP (o compilarlo dentro
+del <code>.exe</code>):</p>
+
+<pre><code>SET PROCEDURE TO chalona-ecf-loader.prg ADDITIVE</code></pre>
+
+<p>La configuración se especifica <strong>una sola vez por sesión</strong>.
+El loader la almacena en <code>goChalonaEcfCfg</code> (y el driver en
+<code>goChalonaEcfDriver</code>) y la <strong>re-inyecta automáticamente</strong>
+cada vez que se descarga / refresca el motor (versión desactualizada,
+hot-reload, etc.). No hay que repetir <code>chalonaSetConfig</code> en cada
+operación.</p>
+
+<p>Dos pasos para operar:</p>
+
+<pre><code><span class="com">* 1. Configurar.</span>
+LOCAL loCfg, loResp
+loCfg = CREATEOBJECT(<span class="str">"Empty"</span>)
+ADDPROPERTY(loCfg, <span class="str">"servidor_ecf"</span>,     <span class="str">"https://ecf-service.vicortiz.com/"</span>)
+ADDPROPERTY(loCfg, <span class="str">"usuario_sync"</span>,     <span class="str">"user...@vicortiz.com"</span>)
+ADDPROPERTY(loCfg, <span class="str">"pass_sync"</span>,        <span class="str">"***"</span>)
+ADDPROPERTY(loCfg, <span class="str">"portal_dgii"</span>,      <span class="str">"ecf"</span>)
+ADDPROPERTY(loCfg, <span class="str">"dgii_multimoneda"</span>, <span class="str">"F"</span>)
+
+<span class="com">* (Opcional) driver custom — sin esto: default SqlServer.</span>
+chalonaSetDriver(CREATEOBJECT(<span class="str">"AlbertoEcfDriver"</span>))
+
+chalonaSetConfig(loCfg)
+
+<span class="com">* 2. Operar.</span>
+loResp = chalonaEnviaEcf(<span class="str">"<control-del-erp>"</span>)
+loResp = chalonaSincronizaEstados()
+loResp = chalonaDescargaDocumentosEcf(<span class="str">"2026-01-01"</span>, <span class="str">"2026-04-30"</span>)</code></pre>
+
+<h3>Ventajas del mecanismo</h3>
+<ul class="tight">
+  <li><strong>Cliente mínimo</strong>: solo el loader (~300 líneas) vive en
+      el ERP. Toda la lógica DGII se descarga del servidor.</li>
+  <li><strong>Hot-reload por versión</strong>: cuando el servidor publica
+      un script nuevo, el siguiente <code>chalonaEnviaEcf</code> detecta
+      <code>fox_cliente.version_desactualizada</code>, redescarga y
+      reintenta — sin reinstalar nada en el cliente.</li>
+  <li><strong>Multi-ERP, misma API</strong>: cualquier host (Vicortiz, Alberto,
+      otros) usa las mismas funciones top-level. El driver inyectado adapta
+      el origen de datos (SQL Server, DBFs, otro esquema).</li>
+  <li><strong>Sin INI ni configuración en disco</strong>: cfg llega por
+      objeto desde el ERP. URL del servidor cae al hardcoded del loader si
+      no se inyecta nada.</li>
+  <li><strong>Aislamiento</strong>: el ERP no instancia clases internas ni
+      conoce la firma del motor; sólo cuatro funciones públicas.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="api">5. API pública</h2>
+
+<h3 id="api-properties">5.1 Properties</h3>
+<table>
+<tr><th>Property</th><th>Tipo</th><th>Descripción</th></tr>
+<tr><td><code>BaseUrl</code></td><td>C</td>
+    <td>URL del servidor. <code>Init</code> / <code>SetConfig</code> la
+        resuelven desde <code>This.Cfg.servidor_ecf</code>.</td></tr>
+<tr><td><code>Usuario</code> / <code>Clave</code></td><td>C / C</td>
+    <td>Credenciales del API (no DGII).</td></tr>
+<tr><td><code>Portal</code></td><td>C</td>
+    <td><code>"testecf"</code> o <code>"ecf"</code>.</td></tr>
+<tr><td><code>Token</code></td><td>C</td>
+    <td>JWT obtenido por <code>_Login</code>. No setear manualmente.</td></tr>
+<tr><td><code>Cfg</code></td><td>O</td>
+    <td>Objeto de configuración. Inyectable con <code>SetConfig()</code>.
+        Default: <code>ChalonaEcfConfigDesdeOsis()</code> en <code>Init</code>.</td></tr>
+<tr><td><code>Driver</code></td><td>O</td>
+    <td>Objeto driver. Default <code>ChalonaEcfDriverSqlServer</code>.</td></tr>
+<tr><td><code>MostrarFormularioError</code></td><td>L</td>
+    <td>Si <code>.T.</code>, abre <code>ChalonaFormErrorEnvioEcf</code>
+        cuando hay error.</td></tr>
+</table>
+
+<h3 id="api-init">Init <span class="pill">PROCEDURE</span></h3>
+<p>Si <code>This.Cfg</code> es <code>.Null.</code> al instanciar, lo arma con
+<code>ChalonaEcfConfigDesdeOsis()</code>. Aplica <code>servidor_ecf</code>,
+<code>usuario_sync</code>, <code>pass_sync</code>, <code>portal_dgii</code> a
+las properties de la clase. Crea <code>ChalonaEcfDriverSqlServer</code> si
+<code>This.Driver</code> está nulo.</p>
+
+<h3 id="api-setconfig">SetConfig(toCfg) <span class="pill">PROCEDURE</span></h3>
+<p>Inyecta el objeto de configuración. Llamar inmediatamente después de
+<code>Createobject("ChalonaEcf")</code>. Re-aplica <code>BaseUrl</code>,
+<code>Usuario</code>, <code>Clave</code> y <code>Portal</code> al setear.
+Para ERPs sin <code>Public osis</code> es la única manera de configurar el
+motor.</p>
+<pre><code>LOCAL loCfg
+loCfg = CREATEOBJECT(<span class="str">"Empty"</span>)
+ADDPROPERTY(loCfg, <span class="str">"servidor_ecf"</span>,     <span class="str">"https://ecf-service.vicortiz.com/"</span>)
+ADDPROPERTY(loCfg, <span class="str">"usuario_sync"</span>,     <span class="str">"..."</span>)
+ADDPROPERTY(loCfg, <span class="str">"pass_sync"</span>,        <span class="str">"..."</span>)
+ADDPROPERTY(loCfg, <span class="str">"portal_dgii"</span>,      <span class="str">"ecf"</span>)
+ADDPROPERTY(loCfg, <span class="str">"dgii_multimoneda"</span>, <span class="str">"F"</span>)
+loEcf.SetConfig(loCfg)</code></pre>
+
+<h3 id="api-setdriver">SetDriver(toDriver) <span class="pill">PROCEDURE</span></h3>
+<p>Reemplaza el driver. Llamar inmediatamente después de
+<code>Createobject("ChalonaEcf")</code>.</p>
+<pre><code>loEcf.SetDriver(CREATEOBJECT(<span class="str">"AlbertoEcfDriver"</span>))</code></pre>
+
+<h3 id="api-enviar">Enviar(tcControl) → ChalonaResponse <span class="pill">PROCEDURE</span></h3>
+<p>Flujo completo: login → build JSON → POST <code>envia_ecf</code> → persistir
+respuesta vía driver (<code>GuardarRespuestaEnvio</code> /
+<code>MarcarErrorEnvio</code>).</p>
+<p>Retorno: objeto <code>ChalonaResponse</code> con
+<code>.ok (L)</code>, <code>.message (C)</code>, <code>.data (O)</code>,
+<code>.rawBody (C)</code>, <code>.requestBody (C)</code>.</p>
+
+<p>Datos relevantes en <code>.data</code> al éxito:</p>
+<ul class="tight">
+  <li><code>numero</code> — eNCF asignado.</li>
+  <li><code>estado</code> — "Aceptado" / "Rechazado" / "En Proceso".</li>
+  <li><code>codigo_seguridad</code>, <code>fecha_firma</code>, <code>timbre</code>.</li>
+  <li><code>secuencia_utilizada</code>, <code>momento</code> (ISO).</li>
+</ul>
+
+<h3 id="api-consultar">ConsultarEstado(tcComprobantesJson) → ChalonaResponse</h3>
+<p><code>tcComprobantesJson</code> = JSON array de eNCFs:
+<code>'["E32...","E31..."]'</code>. Llama
+<code>consulta_estado</code> en el backend.</p>
+
+<h3 id="api-sync">SincronizarEstadosEnProceso() → ChalonaResponse</h3>
+<p>Toma todos los comprobantes con <code>respuesta_estado = 'En Proceso'</code>
+(via driver), consulta DGII en lotes de 100 e-NCF y persiste resultado.
+Usa mutex (<code>SyncIntentarLock</code>) para evitar concurrencia.</p>
+
+<h3 id="api-descargar">DescargarDocumentos(tcDesde, tcHasta, tcTipos) → ChalonaResponse</h3>
+<p>Pide <code>GETFILE('zip')</code>, llama <code>ecf_documentos_list</code>
+y guarda los XMLs/JSONs en un ZIP. Si el usuario cancela el diálogo, retorna
+<code>ok=.T.</code> con <code>message="cancelado"</code>.</p>
+
+<!-- ===================================================================== -->
+<h2 id="driver">6. Contrato del driver</h2>
+
+<p>Cualquier objeto VFP con los siguientes métodos sirve como driver. <strong>No
+hay clase abstracta</strong>: VFP es duck-typed. Si un método falta, el motor
+fallará en runtime al invocarlo.</p>
+
+<h3 id="driver-cursores">6.1 Shape de cursores que el driver debe materializar</h3>
+
+<h4>curChalMae (CargarMaestro)</h4>
+<table>
+<tr><th>Columna</th><th>Tipo</th><th>Significado</th></tr>
+<tr><td><code>fiscal</code></td><td>C(2)</td><td>TipoeCF: "31","32","33","34","41","43"...</td></tr>
+<tr><td><code>encf</code></td><td>C(20)</td><td>e-NCF asignado al documento (si ya tiene).</td></tr>
+<tr><td><code>fecha</code></td><td>D</td><td>Fecha de emisión.</td></tr>
+<tr><td><code>valor</code>, <code>descuento</code>, <code>itbis</code>, <code>total</code></td>
+    <td>N</td><td>Totales (en moneda local DOP, ya con tasa aplicada).</td></tr>
+<tr><td><code>tasa</code></td><td>N (≥1)</td><td>Factor de cambio. Default 1.</td></tr>
+<tr><td><code>moneda</code></td><td>C</td><td>"DOP", "USD", etc.</td></tr>
+<tr><td><code>rnc</code>, <code>nombre</code></td><td>C / C</td>
+    <td>Comprador (ventas) o suplidor (compras).</td></tr>
+<tr><td><code>entidad</code></td><td>C</td><td>Código del cliente/suplidor.</td></tr>
+<tr><td><code>ocontrol</code></td><td>C</td>
+    <td>Control del NCF referenciado (NC/ND). Vacío si no aplica.
+    Si no vacío, motor llama <code>CargarReferenciaImtr(ocontrol)</code>.</td></tr>
+<tr><td><code>fechavencencf</code></td><td>D</td>
+    <td>FechaVencimientoSecuencia. Si vacío, motor llama
+        <code>CargarFiscalVence(tipo)</code>.</td></tr>
+<tr><td><code>dgii_codmod</code></td><td>N</td>
+    <td>CodigoModificacion (1-5) para NC/ND. Default 3.</td></tr>
+<tr><td colspan="3"><strong>Solo si es gastos (compras 41/43):</strong></td></tr>
+<tr><td><code>itbisr</code> / <code>itbir</code></td><td>N</td><td>ITBIS retenido total.</td></tr>
+<tr><td><code>isr</code></td><td>N</td><td>ISR retenido total.</td></tr>
+<tr><td><code>comentario</code>, <code>referencia</code>, <code>doc</code>, <code>numero</code>, <code>ncf</code></td>
+    <td>C</td><td>Para construir línea sintética en gastos.</td></tr>
+</table>
+
+<h4>curChalDet (CargarDetalle, solo ventas)</h4>
+<table>
+<tr><th>Columna</th><th>Tipo</th><th>Significado</th></tr>
+<tr><td><code>precio</code></td><td>N(18,6)</td><td>Precio unitario en DOP (con tasa).</td></tr>
+<tr><td><code>cantidad</code></td><td>N(18,4)</td><td>Cantidad.</td></tr>
+<tr><td><code>descrip</code></td><td>C(200)</td><td>Descripción del item.</td></tr>
+<tr><td><code>mercs_nombre</code></td><td>C(200)</td><td>Nombre del producto.</td></tr>
+<tr><td><code>mercs_servicio</code></td><td>N(2)</td>
+    <td>0/1 mercancía, 2 servicio. Determina <code>IndicadorBienoServicio</code>.</td></tr>
+<tr><td><code>itbis_retenido</code> / <code>isr_retenido</code></td><td>N</td>
+    <td>Retenciones por línea (opcional).</td></tr>
+</table>
+
+<h4>curChalEmp (CargarEmpresa)</h4>
+<table>
+<tr><th>Columna</th><th>Tipo</th><th>Significado</th></tr>
+<tr><td><code>rnc</code></td><td>C(20)</td><td>RNC del emisor.</td></tr>
+<tr><td><code>nombre</code></td><td>C</td><td>Razón social.</td></tr>
+<tr><td><code>direccion</code></td><td>C</td><td>Dirección.</td></tr>
+<tr><td><code>iprecio</code></td><td>L o N</td>
+    <td>1=precio incluye ITBIS (IndicadorMontoGravado=1).</td></tr>
+</table>
+
+<h4>curChalCli (CargarTerceroExtranjero)</h4>
+<table>
+<tr><th>Columna</th><th>Tipo</th><th>Significado</th></tr>
+<tr><td><code>extranjero_flag</code></td><td>N(1) o L</td><td>1 si extranjero.</td></tr>
+<tr><td><code>rnc</code>, <code>nombre</code></td><td>C / C</td>
+    <td>Solo cuando se llamó con <code>tlEsGastos=.F.</code>. Para fallback
+        cuando el maestro no trae rnc/nombre.</td></tr>
+</table>
+
+<h4>curChalSup (CargarSuplidorRncNombre)</h4>
+<table>
+<tr><th>Columna</th><th>Tipo</th></tr>
+<tr><td><code>rnc</code></td><td>C(20)</td></tr>
+<tr><td><code>nombre</code></td><td>C</td></tr>
+</table>
+
+<h4>curChalRef (CargarReferenciaImtr)</h4>
+<table>
+<tr><th>Columna</th><th>Tipo</th></tr>
+<tr><td><code>encf</code></td><td>C(20)</td></tr>
+<tr><td><code>fecha</code></td><td>D</td></tr>
+</table>
+
+<h4>curChalFis (CargarFiscalVence)</h4>
+<table>
+<tr><th>Columna</th><th>Tipo</th></tr>
+<tr><td><code>vence</code></td><td>D</td></tr>
+</table>
+
+<h4 id="cursor-pendientes">curChalonaEncfEnProceso (SyncListarPendientes) <span class="pill">READWRITE</span></h4>
+
+<p>Cursor que devuelve el driver con TODOS los comprobantes "En Proceso"
+listos para sincronizar. El motor consulta DGII en lotes y <strong>escribe el
+resultado de cada eNCF directamente en estas columnas</strong>. Después llama
+<code>SyncFinalizar()</code> para que el driver persista.</p>
+
+<table>
+<tr><th>Columna</th><th>Tipo</th><th>Quién la llena</th><th>Significado</th></tr>
+<tr><td><code>control</code></td><td>C(40)</td><td>Driver</td><td>Identificador opaco del documento.</td></tr>
+<tr><td><code>encf</code></td><td>C(20)</td><td>Driver</td><td>e-NCF asignado al envío.</td></tr>
+<tr><td><code>es_gastos</code></td><td>L</td><td>Driver</td><td><code>.T.</code> si es compra (41/43).</td></tr>
+<tr><td><code>numero</code></td><td>C(20)</td><td>Motor</td><td>e-NCF devuelto por DGII (igual a <code>encf</code> normalmente).</td></tr>
+<tr><td><code>estado</code></td><td>C(200)</td><td>Motor</td><td>"Aceptado" / "Rechazado" / "En Proceso".</td></tr>
+<tr><td><code>estado_descripcion</code></td><td>C(500)</td><td>Motor</td><td>Mensajes acumulados de DGII.</td></tr>
+<tr><td><code>codigo_seguridad</code></td><td>C(200)</td><td>Motor</td><td>Hash CodigoSeguridad.</td></tr>
+<tr><td><code>fecha_firma</code></td><td>C(100)</td><td>Motor</td><td>Fecha de firma (string).</td></tr>
+<tr><td><code>timbre</code></td><td>C(500)</td><td>Motor</td><td>Timbre fiscal.</td></tr>
+<tr><td><code>secuencia_utilizada</code></td><td>N(1)</td><td>Motor</td><td>0/1.</td></tr>
+<tr><td><code>momento</code></td><td>C(50)</td><td>Motor</td><td>Fecha/hora ISO de la respuesta.</td></tr>
+</table>
+
+<div class="note">
+<strong>Patrón cursor + finalize</strong>
+Este es el único caso donde el motor escribe en un cursor del driver.
+El driver puede implementarlo de dos formas:
+<ul class="tight">
+  <li><strong>Cursor temporal sintético</strong> (default SqlServer): el driver
+    crea un <code>Create Cursor</code> local independiente. En
+    <code>SyncFinalizar</code> recorre y emite UPDATEs.</li>
+  <li><strong>Cursor sobre tabla real</strong>: el driver hace <code>USE</code>
+    de la tabla con buffering, y en <code>SyncFinalizar</code> hace
+    <code>TABLEUPDATE</code>.</li>
+</ul>
+</div>
+
+<h3 id="driver-metodos">6.2 Métodos del contrato</h3>
+
+<h4>Lecturas</h4>
+<table>
+<tr><th>Método</th><th>Retorna</th><th>Notas</th></tr>
+<tr><td><code>CargarMaestro(tcControl)</code></td>
+    <td><code>"curChalMae"</code> o <code>""</code></td>
+    <td>Cabecera del documento. Cursor vacío = "no existe" → motor termina sin error.</td></tr>
+<tr><td><code>EsGastos(tcControl) → L</code></td>
+    <td><code>.T./.F.</code></td>
+    <td>True si el control es de compras (41/43).</td></tr>
+<tr><td><code>CargarDetalle(tcControl)</code></td>
+    <td><code>"curChalDet"</code> o <code>""</code></td>
+    <td>Solo ventas. En gastos el motor sintetiza una línea y NO llama esto.</td></tr>
+<tr><td><code>CargarFiscalVence(tcTipoEcf)</code></td>
+    <td><code>"curChalFis"</code> o <code>""</code></td>
+    <td>Fallback de FechaVencimientoSecuencia. Cursor vacío = motor abortará
+        si <code>fechavencencf</code> también está vacío en el maestro.</td></tr>
+<tr><td><code>CargarEmpresa()</code></td>
+    <td><code>"curChalEmp"</code> o <code>""</code></td>
+    <td>Datos del emisor.</td></tr>
+<tr><td><code>CargarSuplidorRncNombre(tcCodigo)</code></td>
+    <td><code>"curChalSup"</code> o <code>""</code></td>
+    <td>Solo gastos. Fallback cuando el maestro no trae RNC.</td></tr>
+<tr><td><code>CargarTerceroExtranjero(tcCodigo, tlEsGastos)</code></td>
+    <td><code>"curChalCli"</code> o <code>""</code></td>
+    <td>Cliente o suplidor para flag extranjero. Si tlEsGastos=.F. devolver
+        también rnc/nombre.</td></tr>
+<tr><td><code>CargarReferenciaImtr(tcOcontrol)</code></td>
+    <td><code>"curChalRef"</code> o <code>""</code></td>
+    <td>Lookup del NCF referenciado para NC/ND.</td></tr>
+</table>
+
+<h4>Origen del control</h4>
+<table>
+<tr><td><code>ContarOrigen(tcControl) → Empty</code></td>
+    <td>Objeto con propiedades <code>.imtr</code> y <code>.gastos</code> (counts).
+        Motor lo usa para <code>_DocOrigen</code> (decide imtr vs gastos vs ambiguous).</td></tr>
+</table>
+
+<h4>Persistencia de respuesta</h4>
+<table>
+<tr><td><code>GuardarRespuestaEnvio(tcControl, loData, tlEsGastos) → L</code></td>
+    <td>Persistir <code>numero</code> (eNCF), <code>estado</code>,
+        <code>momento</code>, <code>codigo_seguridad</code>, <code>fecha_firma</code>,
+        <code>timbre</code>, <code>secuencia_utilizada</code>,
+        <code>estado_descripcion</code> en la tabla origen.</td></tr>
+<tr><td><code>MarcarErrorEnvio(tcControl, tcMensaje, tlEsGastos) → L</code></td>
+    <td>Persistir solo <code>respuesta_mensajes</code> (acotado: 254 imtr / 250 gastos).</td></tr>
+</table>
+
+<h4>Sync masivo</h4>
+<table>
+<tr><td><code>SyncIntentarLock() → N</code></td>
+    <td>Retorna <code>≥0</code> si tomó el lock; <code>&lt;0</code> si ya está tomado;
+        <code>-99</code> si error de infraestructura.</td></tr>
+<tr><td><code>SyncLiberarLock()</code></td><td>Libera el lock.</td></tr>
+<tr><td><code>SyncListarPendientes() → C</code></td>
+    <td>Cursor <strong>READWRITE</strong> con shape ampliado (ver
+        <a href="#cursor-pendientes">6.1 curChalonaEncfEnProceso</a>).
+        Trae los "En Proceso" con e-NCF asignado.
+        Las columnas de respuesta vienen vacías; el motor las llena.</td></tr>
+<tr><td><code>SyncListarDuplicados() → C</code></td>
+    <td>Cursor (control) con duplicados cross-table. Vacío si no aplica.</td></tr>
+<tr><td><code>SyncFinalizar() → L</code></td>
+    <td>El motor lo llama tras escribir los resultados de DGII en el cursor.
+        El driver decide qué hacer: UPDATE batch a la tabla origen, flush via
+        <code>TABLEUPDATE</code>, append a tabla de log, no-op, etc.</td></tr>
+</table>
+
+<h3 id="driver-vfp">6.3 Notas VFP importantes</h3>
+
+<div class="warn">
+<strong>Parámetros omitidos llegan como <code>.F.</code></strong>
+En VFP, los <code>LParameters</code> que no se pasan llegan como
+<code>.F.</code> (false), <strong>no como <code>.Null.</code></strong>.
+<code>Alltrim(.F.)</code> revienta. Defendé al inicio:
+<pre><code>If Vartype(tcControl) # <span class="str">"C"</span>
+   tcControl = <span class="str">""</span>
+Endif</code></pre>
+</div>
+
+<div class="warn">
+<strong>No usar <code>RETURN</code> dentro de <code>TRY/CATCH</code></strong>
+VFP no lo permite (error 2060 "no manejado"). Usar un flag y un
+<code>If</code> después del <code>EndTry</code>.
+</div>
+
+<!-- ===================================================================== -->
+<h2 id="default">7. Driver default: ChalonaEcfDriverSqlServer</h2>
+
+<p>Implementación que viene con el motor. Asume:</p>
+<ul class="tight">
+  <li>Conexión SQL Server activa, accesible vía <code>Request(tcSql, tcAlias)</code>
+    (función global definida por el ERP).</li>
+  <li>Tablas: <code>dbo.imtr</code>, <code>dbo.imtrd</code>, <code>dbo.mercs</code>,
+    <code>dbo.gastos</code>, <code>dbo.fiscal</code>, <code>dbo.empresa</code>,
+    <code>dbo.clientes</code>, <code>dbo.suplidor</code>.</li>
+  <li>Mutex via <code>sp_getapplock</code> sesión-scoped.</li>
+</ul>
+
+<p>El archivo <code>chalona-ecf-driver-default.prg</code> contiene una copia
+standalone de la clase para que sirva de plantilla / referencia. Está
+embebida también dentro de <code>chalona-ecf.prg</code>.</p>
+
+<!-- ===================================================================== -->
+<h2 id="custom">8. Cómo escribir un driver custom</h2>
+
+<p>VFP es duck-typed: cualquier <code>Custom</code> que exponga los métodos
+listados abajo sirve como driver. No se hereda nada del repo Chalona.</p>
+
+<h3>Esqueleto completo (16 métodos)</h3>
+
+<p>Copiar tal cual y rellenar. Cada función ya tiene la defensa VFP de
+<code>Vartype</code> contra parámetros omitidos (que llegan como <code>.F.</code>).</p>
+
+<pre><code><span class="kw">Define Class</span> MiEcfDriver <span class="kw">As</span> Custom
+
+  <span class="com">*=========================================================</span>
+  <span class="com">* LECTURAS</span>
+  <span class="com">*=========================================================</span>
+
+  <span class="kw">Function</span> CargarMaestro
+    <span class="kw">Lparameters</span> tcControl
+    <span class="kw">If</span> Vartype(tcControl) # <span class="str">"C"</span>
+      tcControl = <span class="str">""</span>
+    <span class="kw">Endif</span>
+    <span class="com">* TODO: armar cursor "curChalMae" con shape de seccion 6.1.</span>
+    <span class="kw">Return</span> <span class="str">""</span>   <span class="com">&amp;&amp; "" = no existe / falla</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> EsGastos
+    <span class="kw">Lparameters</span> tcControl
+    <span class="kw">If</span> Vartype(tcControl) # <span class="str">"C"</span>
+      tcControl = <span class="str">""</span>
+    <span class="kw">Endif</span>
+    <span class="com">* .T. para compras (tipos 41/43); .F. para ventas (31/32/33/34).</span>
+    <span class="kw">Return</span> .F.
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> CargarDetalle
+    <span class="kw">Lparameters</span> tcControl
+    <span class="kw">If</span> Vartype(tcControl) # <span class="str">"C"</span>
+      tcControl = <span class="str">""</span>
+    <span class="kw">Endif</span>
+    <span class="com">* TODO: cursor "curChalDet" (precio, cantidad, descrip, mercs_nombre, mercs_servicio, ...).</span>
+    <span class="com">* En gastos el motor sintetiza, no llama esto.</span>
+    <span class="kw">Return</span> <span class="str">""</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> CargarFiscalVence
+    <span class="kw">Lparameters</span> tcTipoEcf
+    <span class="kw">If</span> Vartype(tcTipoEcf) # <span class="str">"C"</span>
+      tcTipoEcf = <span class="str">""</span>
+    <span class="kw">Endif</span>
+    <span class="com">* TODO: cursor "curChalFis" con columna "vence" (D).</span>
+    <span class="kw">Return</span> <span class="str">""</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> CargarEmpresa
+    <span class="com">* TODO: cursor "curChalEmp" (rnc, nombre, direccion, iprecio).</span>
+    <span class="kw">Return</span> <span class="str">""</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> CargarSuplidorRncNombre
+    <span class="kw">Lparameters</span> tcCodigo
+    <span class="kw">If</span> Vartype(tcCodigo) # <span class="str">"C"</span>
+      tcCodigo = <span class="str">""</span>
+    <span class="kw">Endif</span>
+    <span class="com">* TODO: cursor "curChalSup" (rnc, nombre).</span>
+    <span class="kw">Return</span> <span class="str">""</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> CargarTerceroExtranjero
+    <span class="kw">Lparameters</span> tcCodigo, tlEsGastos
+    <span class="kw">If</span> Vartype(tcCodigo) # <span class="str">"C"</span>
+      tcCodigo = <span class="str">""</span>
+    <span class="kw">Endif</span>
+    <span class="kw">If</span> Vartype(tlEsGastos) # <span class="str">"L"</span>
+      tlEsGastos = .F.
+    <span class="kw">Endif</span>
+    <span class="com">* TODO: cursor "curChalCli" (extranjero_flag, rnc, nombre).</span>
+    <span class="com">* tlEsGastos=.T. -> suplidor (solo extranjero_flag).</span>
+    <span class="com">* tlEsGastos=.F. -> clientes (extranjero_flag + rnc + nombre).</span>
+    <span class="kw">Return</span> <span class="str">""</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> CargarReferenciaImtr
+    <span class="kw">Lparameters</span> tcOcontrol
+    <span class="kw">If</span> Vartype(tcOcontrol) # <span class="str">"C"</span>
+      tcOcontrol = <span class="str">""</span>
+    <span class="kw">Endif</span>
+    <span class="com">* TODO: cursor "curChalRef" (encf, fecha) del NCF referenciado (NC/ND).</span>
+    <span class="kw">Return</span> <span class="str">""</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="com">*=========================================================</span>
+  <span class="com">* ORIGEN</span>
+  <span class="com">*=========================================================</span>
+
+  <span class="kw">Function</span> ContarOrigen
+    <span class="kw">Lparameters</span> tcControl
+    <span class="kw">Local</span> loRes
+    loRes = Createobject(<span class="str">"Empty"</span>)
+    AddProperty(loRes, <span class="str">"imtr"</span>, <span class="num">0</span>)
+    AddProperty(loRes, <span class="str">"gastos"</span>, <span class="num">0</span>)
+    <span class="kw">If</span> Vartype(tcControl) # <span class="str">"C"</span>
+      <span class="kw">Return</span> loRes
+    <span class="kw">Endif</span>
+    <span class="com">* TODO: setear loRes.imtr y/o loRes.gastos a 1 si el control existe.</span>
+    <span class="kw">Return</span> loRes
+  <span class="kw">Endfunc</span>
+
+  <span class="com">*=========================================================</span>
+  <span class="com">* PERSISTENCIA POST-ENVIO INDIVIDUAL</span>
+  <span class="com">*=========================================================</span>
+
+  <span class="kw">Function</span> GuardarRespuestaEnvio
+    <span class="kw">Lparameters</span> tcControl, loData, tlEsGastos
+    <span class="kw">If</span> Vartype(tcControl) # <span class="str">"C"</span> Or Vartype(loData) # <span class="str">"O"</span>
+      <span class="kw">Return</span> .F.
+    <span class="kw">Endif</span>
+    <span class="kw">If</span> Vartype(tlEsGastos) # <span class="str">"L"</span>
+      tlEsGastos = .F.
+    <span class="kw">Endif</span>
+    <span class="com">* loData propiedades: numero, estado, momento, codigo_seguridad, fecha_firma,</span>
+    <span class="com">* timbre, secuencia_utilizada, estado_descripcion.</span>
+    <span class="com">* TODO: persistir en tu tabla origen.</span>
+    <span class="kw">Return</span> .T.
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> MarcarErrorEnvio
+    <span class="kw">Lparameters</span> tcControl, tcMensaje, tlEsGastos
+    <span class="kw">If</span> Vartype(tcControl) # <span class="str">"C"</span> Or Vartype(tcMensaje) # <span class="str">"C"</span>
+      <span class="kw">Return</span> .F.
+    <span class="kw">Endif</span>
+    <span class="kw">If</span> Vartype(tlEsGastos) # <span class="str">"L"</span>
+      tlEsGastos = .F.
+    <span class="kw">Endif</span>
+    <span class="com">* TODO: persistir tcMensaje en respuesta_mensajes.</span>
+    <span class="kw">Return</span> .T.
+  <span class="kw">Endfunc</span>
+
+  <span class="com">*=========================================================</span>
+  <span class="com">* SYNC MASIVO  (cursor + finalize)</span>
+  <span class="com">*=========================================================</span>
+
+  <span class="kw">Function</span> SyncIntentarLock
+    <span class="com">* TODO: tomar lock global. Retorna &gt;=0 si OK; &lt;0 si ocupado; -99 si error.</span>
+    <span class="kw">Return</span> <span class="num">0</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Procedure</span> SyncLiberarLock
+    <span class="com">* TODO: liberar el lock.</span>
+  <span class="kw">Endproc</span>
+
+  <span class="kw">Function</span> SyncListarPendientes
+    ChalonaEcfUseInIfUsed(<span class="str">"curChalonaEncfEnProceso"</span>)
+    <span class="kw">Create Cursor</span> curChalonaEncfEnProceso ;
+      (control C(<span class="num">40</span>), encf C(<span class="num">20</span>), es_gastos L, ;
+       numero C(<span class="num">20</span>), estado C(<span class="num">200</span>), estado_descripcion C(<span class="num">500</span>), ;
+       codigo_seguridad C(<span class="num">200</span>), fecha_firma C(<span class="num">100</span>), timbre C(<span class="num">500</span>), ;
+       secuencia_utilizada N(<span class="num">1</span>), momento C(<span class="num">50</span>))
+    <span class="com">* TODO: Insert filas con (control, encf, es_gastos) por cada documento</span>
+    <span class="com">* "En Proceso" + e-NCF asignado. Las demas columnas las llena el motor.</span>
+    <span class="kw">Return</span> <span class="str">"curChalonaEncfEnProceso"</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> SyncListarDuplicados
+    ChalonaEcfUseInIfUsed(<span class="str">"curChalDup"</span>)
+    <span class="kw">Create Cursor</span> curChalDup (control C(<span class="num">40</span>))
+    <span class="com">* TODO: filas con controls duplicados cross-table. Vacio si no aplica.</span>
+    <span class="kw">Return</span> <span class="str">"curChalDup"</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> SyncFinalizar
+    <span class="com">* Motor escribio en curChalonaEncfEnProceso los resultados de DGII.</span>
+    <span class="com">* TODO: persistir esos resultados (UPDATE batch / TABLEUPDATE / log / etc.).</span>
+    <span class="kw">Return</span> .T.
+  <span class="kw">Endfunc</span>
+
+<span class="kw">EndDefine</span></code></pre>
+
+<h3>Plantilla mínima viable (subset)</h3>
+
+<p>Si solo necesitás <code>Enviar()</code> (no sync masivo, sin
+NC/ND, sin gastos):</p>
+
+<pre><code><span class="kw">Define Class</span> MiEcfDriver <span class="kw">As</span> Custom
+
+  <span class="kw">Function</span> CargarMaestro       <span class="kw">Lparameters</span> tcControl
+     <span class="com">* armar curChalMae</span>
+     <span class="kw">Return</span> <span class="str">"curChalMae"</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> CargarDetalle       <span class="kw">Lparameters</span> tcControl
+     <span class="com">* armar curChalDet</span>
+     <span class="kw">Return</span> <span class="str">"curChalDet"</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> CargarEmpresa
+     <span class="com">* armar curChalEmp</span>
+     <span class="kw">Return</span> <span class="str">"curChalEmp"</span>
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> ContarOrigen
+     <span class="kw">Lparameters</span> tcControl
+     <span class="kw">Local</span> loRes
+     loRes = Createobject(<span class="str">"Empty"</span>)
+     AddProperty(loRes, <span class="str">"imtr"</span>, <span class="num">1</span>)
+     AddProperty(loRes, <span class="str">"gastos"</span>, <span class="num">0</span>)
+     <span class="kw">Return</span> loRes
+  <span class="kw">Endfunc</span>
+
+  <span class="kw">Function</span> EsGastos              <span class="kw">Return</span> .F. <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> CargarFiscalVence     <span class="kw">Return</span> <span class="str">""</span>  <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> CargarSuplidorRncNombre  <span class="kw">Return</span> <span class="str">""</span> <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> CargarTerceroExtranjero  <span class="kw">Return</span> <span class="str">""</span> <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> CargarReferenciaImtr  <span class="kw">Return</span> <span class="str">""</span> <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> GuardarRespuestaEnvio <span class="kw">Return</span> .T. <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> MarcarErrorEnvio      <span class="kw">Return</span> .T. <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> SyncIntentarLock      <span class="kw">Return</span> <span class="num">0</span>  <span class="kw">Endfunc</span>
+  <span class="kw">Procedure</span> SyncLiberarLock     <span class="kw">Endproc</span>
+  <span class="kw">Function</span> SyncListarPendientes  <span class="kw">Return</span> <span class="str">""</span> <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> SyncListarDuplicados  <span class="kw">Return</span> <span class="str">""</span> <span class="kw">Endfunc</span>
+  <span class="kw">Function</span> SyncFinalizar         <span class="kw">Return</span> .T. <span class="kw">Endfunc</span>
+
+<span class="kw">EndDefine</span></code></pre>
+
+<h4>Pasos sugeridos</h4>
+<ol>
+  <li>Definir formato de <code>tcControl</code> (ej. <code>"tipo|numero"</code>).</li>
+  <li>Implementar primero <code>CargarMaestro</code> + <code>CargarEmpresa</code>
+    + <code>ContarOrigen</code> + <code>EsGastos</code>. Suficiente para tipo 32.</li>
+  <li>Probar con un envío real (<code>loEcf.Enviar(tcControl)</code>).</li>
+  <li>Agregar <code>CargarDetalle</code>, <code>CargarSuplidorRncNombre</code>,
+    <code>CargarTerceroExtranjero</code>, <code>CargarReferenciaImtr</code>,
+    <code>CargarFiscalVence</code> según necesidad.</li>
+  <li>Persistencia: <code>GuardarRespuestaEnvio</code> y
+    <code>MarcarErrorEnvio</code>. Si tu ERP sincroniza vía pull,
+    pueden ser no-op (<code>Return .T.</code>).</li>
+  <li>Sync masivo: si no usás <code>SincronizarEstadosEnProceso</code>,
+    los <code>Sync*</code> pueden retornar cursores vacíos / lock noop.</li>
+</ol>
+
+<h3 id="alberto">8.1 Caso real: Alberto (DBFs)</h3>
+
+<p>Driver completo en
+<code>ecf/clients/fox/alberto/alberto-ecf-driver.prg</code>. Sirve de
+ejemplo concreto.</p>
+
+<table>
+<tr><th>TipoeCF</th><th>Tabla DBF</th><th>Filtro</th></tr>
+<tr><td>31 (FCF)</td><td><code>cxc</code></td><td><code>transa=3</code></td></tr>
+<tr><td>32 (FC)</td><td><code>ventas</code></td><td><code>transa=4</code></td></tr>
+<tr><td>33 (ND)</td><td><code>cxc</code></td><td><code>transa=3</code> (TODO confirmar)</td></tr>
+<tr><td>34 (NC)</td><td><code>ncr</code></td><td><code>transa=107</code></td></tr>
+<tr><td>41 (Compra)</td><td><code>compras</code></td><td><code>transa=2</code></td></tr>
+<tr><td>43 (Gasto Menor)</td><td><code>reggasto</code></td><td>—</td></tr>
+</table>
+
+<p>Particularidades:</p>
+<ul>
+  <li>Lock sync por archivo (<code>data\chalonaecf_sync.lck</code>) — no hay <code>sp_getapplock</code>.</li>
+  <li><code>GuardarRespuestaEnvio</code> es no-op: Alberto sincroniza vía pull periódico
+    a <code>/cg/ecf/ecfGetUpdates</code> que actualiza la DBF <code>sync_ecf</code>.</li>
+  <li>Helpers <code>_NumProp</code>, <code>_StrProp</code>, <code>_FechaProp</code>
+    blindan acceso a campos opcionales (algunos DBFs no tienen ciertas
+    columnas; <code>Type()</code> chequea antes de leer).</li>
+  <li>Para NC, se setea <code>ocontrol = "ALB:" + ncfa</code> (no vacío) para que
+    el motor llame <code>CargarReferenciaImtr</code>; el driver entrega el cursor
+    con datos ya en propiedades del objeto.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="endpoints">9. Endpoints HTTP del backend</h2>
+
+<table>
+<tr><th>Endpoint</th><th>Método</th><th>Body</th><th>Uso</th></tr>
+<tr><td><code>sistema_login</code></td><td>POST</td>
+    <td><code>{request,data:{app,locale,usuario,clave}}</code></td>
+    <td>Devuelve <code>{token}</code> JWT.</td></tr>
+<tr><td><code>envia_ecf</code></td><td>POST</td>
+    <td><code>{rnc,portal,json:{Encabezado,DetallesItems,…}}</code></td>
+    <td>Envía e-CF a DGII. Aplica blindajes 1960/11014/156/613.</td></tr>
+<tr><td><code>consulta_estado</code></td><td>POST</td>
+    <td><code>{data:{comprobantes:["E32...",…]}}</code></td>
+    <td>Estado actual por lote de eNCFs.</td></tr>
+<tr><td><code>ecf_documentos_list</code></td><td>POST</td>
+    <td><code>{data:{desde,hasta,tipos[]}}</code></td>
+    <td>Listado para descarga.</td></tr>
+</table>
+
+<p>Todos requieren header <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+
+<!-- ===================================================================== -->
+<h2 id="errores">10. Manejo de errores</h2>
+
+<p>Códigos del motor (<code>loResp.message</code>):</p>
+<table>
+<tr><th>Código</th><th>Significado</th></tr>
+<tr><td><code>login.fallo</code></td><td>Token vacío tras <code>_Login</code>.</td></tr>
+<tr><td><code>usuario/clave requeridos</code></td><td>Credenciales vacías.</td></tr>
+<tr><td><code>portal requerido</code></td><td><code>Portal</code> vacío.</td></tr>
+<tr><td><code>http.error</code></td><td><code>_HttpPostJson</code> falló.</td></tr>
+<tr><td><code>sql.ecf2json.error</code></td>
+    <td><code>ChalonaEcfBuildDocJsonFox</code> retornó <code>.Null.</code>.</td></tr>
+<tr><td><code>ecf2json.vacio</code></td><td>Documento sin datos.</td></tr>
+<tr><td><code>json.sin_rnc_emisor</code></td><td>JSON construido sin RNC del emisor.</td></tr>
+<tr><td><code>ecf.iddoc.fecha_vencimiento_requerida</code></td>
+    <td>FechaVencimientoSecuencia obligatoria sin valor (tipos 31,33,41,43-47).</td></tr>
+<tr><td><code>ecf.gastos.tipo_no_permitido</code></td><td>Gastos solo permite 41 y 43.</td></tr>
+<tr><td><code>fox_cliente.version_desactualizada</code></td>
+    <td>Backend rechaza esta versión del cliente. El loader hace retry transparente
+        descargando la versión activa.</td></tr>
+<tr><td><code>error.no_manejado</code></td>
+    <td>Excepción VFP no atrapada. Hay log en <code>ChalonaEcfLogException</code>.</td></tr>
+</table>
+
+<p>Helpers de logging:</p>
+<ul class="tight">
+  <li><code>ChalonaEcfLogError(tcMsg, tcControl, tcExtra)</code> — error textual.</li>
+  <li><code>ChalonaEcfLogException(tcCtx, tcControl, toEx, tcExtra)</code> — desde <code>Catch To</code>.</li>
+  <li><code>ChalonaEcfSaveUltimoJson(tcControl, lcDocJson)</code> — guarda JSON enviado.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2 id="troubleshooting">11. Troubleshooting</h2>
+
+<h4>"Class not found: ChalonaEcfDriverSqlServer"</h4>
+<p>El loader cargó solo parte del prg, o la versión activa de
+<code>data.fox_cliente_script</code> es vieja. Republicar
+(<code>./scripts/actualiza-cliente-fox.sh</code>) y reiniciar el ERP.</p>
+
+<h4>"Argument list too long" al publicar</h4>
+<p>El script <code>actualiza-cliente-fox.sh</code> debe pasar el SQL via stdin,
+no <code>-c</code>. Versión actualizada (≥abril 2026) ya lo hace.</p>
+
+<h4>DGII rechaza con código 613 ("no pueden reemplazarse entre ellos")</h4>
+<p>Tipo 31 referenciando otro e-CF que no es FC electrónica. El motor ya
+omite la referencia en este caso, pero verificar que el driver no esté
+forzando <code>ocontrol</code> con un eNCF inválido.</p>
+
+<h4>DGII rechaza con código 11204 (TipoMoneda inválido)</h4>
+<p>El XSD no acepta <code>TipoMoneda="RD"</code>. Si <code>moneda</code>
+del maestro es DOP/RD/peso, el motor NO emite <code>OtraMoneda</code>;
+si llega "RD" igualmente, revisar <code>imtr.moneda</code> (debe ser vacío,
+"DOP" o divisa real).</p>
+
+<h4>"No se puede sincronizar respuesta; control ambiguo"</h4>
+<p><code>ContarOrigen</code> retornó <code>imtr ≥ 1 AND gastos ≥ 1</code>.
+Indica que el mismo <code>tcControl</code> existe en ambas tablas. Bug
+de datos: corregir antes de seguir.</p>
+
+<h4>El motor llama Request() pero el ERP no la tiene</h4>
+<p>El driver default (SqlServer) usa <code>Request(tcSql, tcAlias)</code>.
+Si tu ERP no la define, escribir un driver custom y NO usar el default.</p>
+
+<hr>
+<p class="small">
+Generado para la rama <code>alberto</code> · driver pattern instaurado en abril 2026.
+Última versión publicada en <code>data.fox_cliente_script</code> entorno=test:
+ver <code>SELECT MAX(version) FROM data.fox_cliente_script WHERE entorno='test'</code>.
+</p>
+
+</main>
+</div>
+</body>
+</html>

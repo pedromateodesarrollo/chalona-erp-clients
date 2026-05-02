@@ -1,0 +1,21 @@
+# Dart
+.dart_tool/
+.packages
+build/
+pubspec.lock
+*.evc
+.cache_drivers/
+
+# VFP cache
+*.fxp
+chalona-ecf-v*.prg
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local secrets / overrides
+.env
+*.local.sh
