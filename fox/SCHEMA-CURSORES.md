@@ -42,13 +42,13 @@ Create Cursor curChalMae ;
    numero              C(40),
    * --- Writeback (motor reescribe tras envia_ecf) ---
    estado              C(200),
-   estado_descripcion  C(500),
+   estado_descripcion  M,         
    codigo_seguridad    C(200),
    fecha_firma         C(100),
-   timbre              C(500),
+   timbre              M,         
    secuencia_utilizada N(1),
    momento             C(50),
-   respuesta_mensajes  C(500))
+   respuesta_mensajes  M)         
 ```
 
 **Reglas de llenado:**
@@ -71,7 +71,8 @@ Create Cursor curChalDet ;
    descrip            C(200),
    mercs_nombre       C(200),
    mercs_servicio     N(2),    && 0/1 = mercancía, 2 = servicio
-   itbis              N(18,2), && opcional: ITBIS por línea (override por-línea de IndicadorFacturacion)
+   itbis              N(18,2), && monto ITBIS por línea
+   itbis_tasa         N(5,2),  && tasa ITBIS por línea: 18→I1, 16→I2, 0+itbis=0 → exento (IndicadorFacturacion)
    itbis_retenido     N(18,2), && opcional
    isr_retenido       N(18,2)) && opcional
 ```
@@ -159,10 +160,10 @@ Create Cursor curChalonaEncfEnProceso ;
    * --- Writeback (motor reescribe tras consulta_estado) ---
    numero              C(20),
    estado              C(200),
-   estado_descripcion  C(500),
+   estado_descripcion  M,         
    codigo_seguridad    C(200),
    fecha_firma         C(100),
-   timbre              C(500),
+   timbre              M,         
    secuencia_utilizada N(1),
    momento             C(50))
 ```
@@ -175,7 +176,7 @@ Cliente llena `control`, `encf`, `es_gastos`. Motor consulta DGII en lotes de 10
 
 ```fox
 Create Cursor curChalDescarga ;
-  (zip_path C(260))   && ruta absoluta del .zip generado
+  (zip_path C(254))   && ruta absoluta del .zip generado
 ```
 
 Motor llena después de `DescargarDocumentosACursor(tcDesde, tcHasta, tcTiposJson)`. Una fila con la ruta del ZIP descargado.

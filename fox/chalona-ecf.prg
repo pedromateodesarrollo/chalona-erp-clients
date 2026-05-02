@@ -33,6 +33,15 @@ Procedure ChalonaEcfUseInIfUsed
   Endif
 Endproc
 
+* Variable publica opcional para suprimir Messagebox + form de error de envio.
+* Util para debugging desde una sesion automatizada (Claude / scripts) que no
+* puede atender popups. Por defecto ausente -> UI normal. Setear:
+*   PUBLIC glChalonaEcfSilenciarUi
+*   glChalonaEcfSilenciarUi = .T.
+Function _ChalonaEcfUiSilenciada
+  Return Type("glChalonaEcfSilenciarUi") = "L" And glChalonaEcfSilenciarUi
+Endfunc
+
 Procedure ChalonaEcfCleanupCursorsImtrJson
   ChalonaEcfUseInIfUsed("curChalMae")
   ChalonaEcfUseInIfUsed("curChalDet")
@@ -244,13 +253,13 @@ Endfunc
 
 * Retorno: .Null. = fallo SQL; "" = sin fila imtr; cadena = JSON raiz listo para envia_ecf.
 Function ChalonaEcfBuildDocJsonFox
-  Lparameters tcControl, toEcf, toCfg
-  * toEcf: instancia ChalonaEcf (para llamar metodos privados _Cargar*, _Contar*).
+  Lparameters tcControl, toCfg
+  * Lee los cursores curChal* (que deben estar pre-poblados, ya sea via
+  * Enviar(ctrl) -> _PoblarCursoresDesdeImtr (path SQL Server) o via el
+  * integrador llamando CrearCursores + INSERT INTO directo).
+  * No hace Request() — esta funcion es puro armado de JSON desde cursores.
   * toCfg: objeto de configuración (ChalonaEcfCfgProp). Si no llega, se asume
   * que las flags como dgii_multimoneda están vacías.
-  If Vartype(toEcf) # "O"
-    Return .Null.
-  Endif
   Local lcQ, lcSql, lcJson, lnTotalBruto, lnLn, lcDet, lcSep
   Local lcTipoeCF, lcEncf, ldFecEmi, lnDiasCr, lnValor, lnDescMae, lnItbis, lnTotal
   Local lcMaeRnc, lcMaeNombre, lcEntidad, lcOcontrol
@@ -301,8 +310,6 @@ Function ChalonaEcfBuildDocJsonFox
 
   Try
     Do While .T.
-      ChalonaEcfCleanupCursorsImtrJson()
-
       tcControl = Alltrim(Nvl(tcControl, ""))
       If Empty(tcControl)
         lcOut = ""
@@ -310,22 +317,15 @@ Function ChalonaEcfBuildDocJsonFox
       Endif
       lcQ = _ChalonaSqlQuote(tcControl)
 
-      * Determinar origen (imtr/gastos) y cargar el maestro via driver.
-      Local loOrigen
-      loOrigen = toEcf._ContarOrigen(tcControl)
-      If (loOrigen.imtr + loOrigen.gastos) < 1
-        lcOut = ""
-        Exit
-      Endif
-      llEsGastos = (loOrigen.gastos = 1 And loOrigen.imtr = 0)
-      If Empty(Alltrim(toEcf._CargarMaestro(tcControl)))
-        llNull = .T.
-        Exit
-      Endif
+      * Cursores deben estar pre-poblados. Si curChalMae vacio, abortar.
       If !Used("curChalMae") Or Reccount("curChalMae") < 1
         lcOut = ""
         Exit
       Endif
+      Select curChalMae
+      Go Top
+      * Origen: derivado del fiscal (41/43 = gastos).
+      llEsGastos = Inlist(Int(Val(Alltrim(Transform(Nvl(fiscal, ""))))), 41, 43)
 
   Select curChalMae
   Go Top
@@ -416,8 +416,7 @@ Function ChalonaEcfBuildDocJsonFox
 
   * En gastos a veces el RNC no viene en la fila; buscarlo en suplidor para cumplir RNCComprador requerido.
   If llEsGastos And Empty(Alltrim(lcMaeRnc)) And !Empty(Alltrim(lcEntidad))
-    If !Empty(Alltrim(toEcf._CargarSuplidorRncNombre(lcEntidad))) ;
-        And Used("curChalSup") And Reccount("curChalSup") > 0
+    If Used("curChalSup") And Reccount("curChalSup") > 0
       Select curChalSup
       Go Top
       If Type("curChalSup.rnc") # "U"
@@ -437,10 +436,6 @@ Function ChalonaEcfBuildDocJsonFox
     lcFecVen = _ChalonaEcfFmtDdMmYy(fechavencencf)
   Endif
   If Empty(Alltrim(lcFecVen)) And !Empty(lcTipoeCF)
-    If Empty(Alltrim(toEcf._CargarFiscalVence(lcTipoeCF)))
-      llNull = .T.
-      Exit
-    Endif
     If Used("curChalFis") And Reccount("curChalFis") > 0
       Select curChalFis
       Go Top
@@ -463,10 +458,6 @@ Function ChalonaEcfBuildDocJsonFox
   lcEmpNom = ""
   lcEmpDir = ""
       lnIprecio = 0
-  If Empty(Alltrim(toEcf._CargarEmpresa()))
-    llNull = .T.
-    Exit
-  Endif
   If Used("curChalEmp") And Reccount("curChalEmp") > 0
     Select curChalEmp
     Go Top
@@ -487,23 +478,15 @@ Function ChalonaEcfBuildDocJsonFox
   lnExtranjero = 0
   If !Empty(lcEntidad)
     If llEsGastos
-      * Compras: el tercero es suplidor (no clientes). extranjero vive en dbo.suplidor.
+      * Compras: tercero es suplidor. extranjero vive en curChalCli.
       lcSuplidorId = lcEntidad
-      * Si falla, fallback silencioso a extranjero=0 (algunos ERPs no tienen suplidor).
-      If Empty(Alltrim(toEcf._CargarTerceroExtranjero(lcSuplidorId, .T.)))
-        ChalonaEcfUseInIfUsed("curChalCli")
-      Endif
       If Used("curChalCli") And Reccount("curChalCli") > 0
         Select curChalCli
         Go Top
         lnExtranjero = _ChalonaEcfNzNum(extranjero_flag)
       Endif
     Else
-      * Ventas: el tercero viene de clientes.
-      If Empty(Alltrim(toEcf._CargarTerceroExtranjero(lcEntidad, .F.)))
-        llNull = .T.
-        Exit
-      Endif
+      * Ventas: tercero viene de curChalCli (cliente).
       If Used("curChalCli") And Reccount("curChalCli") > 0
         Select curChalCli
         Go Top
@@ -550,10 +533,6 @@ Function ChalonaEcfBuildDocJsonFox
       Endif
     Endif
     If !llOmitirRef
-      If Empty(Alltrim(toEcf._CargarReferenciaImtr(lcOcontrol)))
-        llNull = .T.
-        Exit
-      Endif
       If Used("curChalRef") And Reccount("curChalRef") > 0
         Select curChalRef
         Go Top
@@ -617,12 +596,8 @@ Function ChalonaEcfBuildDocJsonFox
     Else
       Replace precio With Round(Iif(lnTasaFactor = 0, lnBaseSinItbis, (lnBaseSinItbis / lnTasaFactor)), 6) In curChalDet
     Endif
-  Else
-    If Empty(Alltrim(toEcf._CargarDetalle(tcControl)))
-      llNull = .T.
-      Exit
-    Endif
   Endif
+  * (Ventas: curChalDet debe estar pre-poblado por _PoblarCursoresDesdeImtr o por el integrador.)
 
   lnTotalBruto = 0
   If Used("curChalDet") And Reccount("curChalDet") > 0
@@ -750,12 +725,18 @@ Function ChalonaEcfBuildDocJsonFox
       Else
         lnItbisLineaVal = Iif(lnItbis > 0, 1, 0)
       Endif
+      * itbis_tasa por linea (override DGII): >0 fuerza gravado, 0 con itbis=0 => exento.
+      Local lnTasaLin
+      lnTasaLin = Iif(Type("itbis_tasa") # "U", _ChalonaEcfNzNum(itbis_tasa), 0)
       lnSumTotalDet = lnSumTotalDet + lnMontoItem
       Do Case
       Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
         lnSumExento = lnSumExento + lnMontoItem
       Case lnTipoEcf = 46
         lnSumGravadoI3 = lnSumGravadoI3 + lnMontoItem
+      Case lnTasaLin > 0
+        lnSumGravadoI1 = lnSumGravadoI1 + lnMontoItem
+        lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
       Case lnItbisLineaVal = 0
         lnSumExento = lnSumExento + lnMontoItem
       Otherwise
@@ -879,18 +860,22 @@ Function ChalonaEcfBuildDocJsonFox
       '"TotalITBIS3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
       '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
   Case lnItbis = 0
+    * Si el detalle suma exento, usar la suma (cabecera valor puede estar en 0).
+    Local lnExentoFinal, lnTotalFinalCab
+    lnExentoFinal = Iif(lnSumExento > 0, lnSumExento, lnBaseGrav)
+    lnTotalFinalCab = Iif(lnSumExento > 0, lnSumExento, lnTotal)
     lcTot = "{" + ;
       '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
       '"MontoGravadoI1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
       '"MontoGravadoI2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
       '"MontoGravadoI3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-      '"MontoExento":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
+      '"MontoExento":' + _ChalonaEcfJsonNum(lnExentoFinal, 2) + "," + ;
       '"TotalITBIS":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
       '"ITBIS1":0,"ITBIS2":0,"ITBIS3":0,' + ;
       '"TotalITBIS1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
       '"TotalITBIS2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
       '"TotalITBIS3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-      '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
+      '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotalFinalCab, 2) + "}"
   Otherwise
     If lnIndicadorMontoGravado = 1 And lnSumMontoItems > 0 And lnItbis1 > 0
       lnFactorItbis = 1 + (lnItbis1 / 100)
@@ -1103,11 +1088,18 @@ Function ChalonaEcfBuildDocJsonFox
         Else
           lnItbisLineaVal = Iif(lnItbis > 0, 1, 0)
         Endif
+        * itbis_tasa por linea: 18=>I1, 16=>I2, >0 sin match => I1 (gravado tasa principal).
+        Local lnTasaLinIF
+        lnTasaLinIF = Iif(Type("itbis_tasa") # "U", _ChalonaEcfNzNum(itbis_tasa), 0)
         Do Case
         Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
           lnIndFactLin = 4
         Case lnTipoEcf = 46
           lnIndFactLin = 3
+        Case lnTasaLinIF = 16
+          lnIndFactLin = 2
+        Case lnTasaLinIF > 0
+          lnIndFactLin = 1
         Case lnItbisLineaVal = 0
           lnIndFactLin = 4
         Otherwise
@@ -1299,7 +1291,7 @@ Define Class ChalonaEcf As Custom
       * Persistir mensaje de error en el documento (imtr o gastos).
       This._DocMarcaErrorEnvio(tcControl, loResp)
     Endif
-    If Vartype(loResp) = "O" And !loResp.ok
+    If Vartype(loResp) = "O" And !loResp.ok And !_ChalonaEcfUiSilenciada()
       lcMsg = _ChalonaEcfMensajeErrorImtr(loResp)
       lcBox = lcMsg
       If !Empty(Nvl(tcControl, ""))
@@ -1309,7 +1301,8 @@ Define Class ChalonaEcf As Custom
     Endif
     If This.MostrarFormularioError ;
         And Vartype(loResp) = "O" ;
-        And !loResp.ok
+        And !loResp.ok ;
+        And !_ChalonaEcfUiSilenciada()
       ChalonaMostrarErrorEnvioEcf(loResp, tcControl)
     Endif
     Return loResp
@@ -1359,8 +1352,12 @@ Define Class ChalonaEcf As Custom
 
         lcBaseUrl = This.GetBaseUrl()
 
-        * --- JSON DGII en Fox: SELECTs simples (sin dbo.ecf2json / FOR JSON en el servidor) ---
-        lcDocJson = ChalonaEcfBuildDocJsonFox(tcControl, This, This.Cfg)
+        * Path SQL Server: poblar cursores rigid via Request a dbo.imtr/gastos/etc.
+        This.CrearCursores()
+        This._PoblarCursoresDesdeImtr(tcControl)
+
+        * Armar JSON desde cursores ya poblados.
+        lcDocJson = ChalonaEcfBuildDocJsonFox(tcControl, This.Cfg)
         If Isnull(lcDocJson)
           ChalonaEcfLogError("JSON: ChalonaEcfBuildDocJsonFox devolviÃ³ .Null.", tcControl, "")
           If Type("gcChalonaEcfBuildDocError") = "C" And !Empty(Alltrim(Nvl(gcChalonaEcfBuildDocError, "")))
@@ -1881,13 +1878,13 @@ Define Class ChalonaEcf As Custom
        doc                 C(40), ;
        numero              C(40), ;
        estado              C(200), ;
-       estado_descripcion  C(500), ;
+       estado_descripcion  M, ;
        codigo_seguridad    C(200), ;
        fecha_firma         C(100), ;
-       timbre              C(500), ;
+       timbre              M, ;
        secuencia_utilizada N(1), ;
        momento             C(50), ;
-       respuesta_mensajes  C(500))
+       respuesta_mensajes  M)
 
     ChalonaEcfUseInIfUsed("curChalDet")
     Create Cursor curChalDet ;
@@ -1897,6 +1894,7 @@ Define Class ChalonaEcf As Custom
        mercs_nombre   C(200), ;
        mercs_servicio N(2), ;
        itbis          N(18,2), ;
+       itbis_tasa     N(5,2), ;
        itbis_retenido N(18,2), ;
        isr_retenido   N(18,2))
 
@@ -1933,15 +1931,15 @@ Define Class ChalonaEcf As Custom
        es_gastos           L, ;
        numero              C(20), ;
        estado              C(200), ;
-       estado_descripcion  C(500), ;
+       estado_descripcion  M, ;
        codigo_seguridad    C(200), ;
        fecha_firma         C(100), ;
-       timbre              C(500), ;
+       timbre              M, ;
        secuencia_utilizada N(1), ;
        momento             C(50))
 
     ChalonaEcfUseInIfUsed("curChalDescarga")
-    Create Cursor curChalDescarga (zip_path C(260))
+    Create Cursor curChalDescarga (zip_path C(254))
   Endproc
 
   *--------------------------------------------------------------------------
@@ -1980,7 +1978,7 @@ Define Class ChalonaEcf As Custom
         Endif
         lcBaseUrl = This.GetBaseUrl()
 
-        lcDocJson = ChalonaEcfBuildDocJsonFox(tcControl, This, This.Cfg)
+        lcDocJson = ChalonaEcfBuildDocJsonFox(tcControl, This.Cfg)
         If Isnull(lcDocJson)
           If Type("gcChalonaEcfBuildDocError") = "C" And !Empty(Alltrim(Nvl(gcChalonaEcfBuildDocError, "")))
             loResp = ChalonaResponseNew(.F., gcChalonaEcfBuildDocError, "", "")
@@ -2037,6 +2035,23 @@ Define Class ChalonaEcf As Custom
         And Not Empty(Nvl(lcSendReq, ""))
       loResp.requestBody = lcSendReq
     Endif
+
+    * UI de error: form con boton copiar + Messagebox breve. Se omite en
+    * version_desactualizada (loader hace retry transparente) y cuando
+    * glChalonaEcfSilenciarUi=.T. (modo debug, sin popups).
+    If Vartype(loResp) = "O" And !loResp.ok And !llVersionDesact And !_ChalonaEcfUiSilenciada()
+      Local lcMsg, lcBox
+      lcMsg = _ChalonaEcfMensajeErrorImtr(loResp)
+      lcBox = lcMsg
+      If !Empty(Nvl(tcControl, ""))
+        lcBox = "Control: " + Alltrim(tcControl) + Chr(13) + Chr(10) + lcBox
+      Endif
+      Messagebox(lcBox, 16, "Chalona ECF - Error de envio")
+      If This.MostrarFormularioError
+        ChalonaMostrarErrorEnvioEcf(loResp, tcControl)
+      Endif
+    Endif
+
     Return loResp
   Endproc
 
@@ -2229,92 +2244,298 @@ Define Class ChalonaEcf As Custom
   * llaman Enviar; usan CrearCursores+EnviarDesdeCursores.
   *==========================================================================
 
+  * Helpers SQL Server: cada uno hace Request a un cursor RAW y luego
+  * INSERT INTO el cursor rigido (creado por CrearCursores). Asi todo el
+  * motor (path Enviar(ctrl) y path EnviarDesdeCursores) trabaja sobre
+  * el mismo shape petrificado documentado en SCHEMA-CURSORES.md.
+  *
+  * Si el rigid cursor no existe (caso defensivo), se invoca CrearCursores.
+
+  *--------------------------------------------------------------------------
+  * Orquesta la carga completa via Request: maestro, detalle, empresa,
+  * tercero, suplidor (gastos sin RNC), fiscal vence, referencia.
+  * Solo se llama desde Enviar(ctrl) (path SQL Server). EnviarDesdeCursores
+  * NO llama esto — los cursores ya vienen llenos por el integrador.
+  Procedure _PoblarCursoresDesdeImtr
+    Lparameters tcControl
+    Local llEsGastos, lcTipo, lcEntidad, lcOcontrol, lcRncMae, ldFecVence
+
+    * 1. Maestro (imtr o gastos)
+    If Empty(Alltrim(This._CargarMaestro(tcControl)))
+      Return
+    Endif
+    If !Used("curChalMae") Or Reccount("curChalMae") < 1
+      Return
+    Endif
+    Select curChalMae
+    Go Top
+    lcTipo     = Alltrim(Transform(Nvl(fiscal, "")))
+    lcEntidad  = Alltrim(Transform(Nvl(entidad, "")))
+    lcOcontrol = Alltrim(Transform(Nvl(ocontrol, "")))
+    lcRncMae   = Alltrim(Transform(Nvl(rnc, "")))
+    ldFecVence = Iif(Inlist(Type("fechavencencf"), "D", "T"), ;
+                      Iif(Type("fechavencencf")="T", Ttod(fechavencencf), fechavencencf), ;
+                      {/})
+    llEsGastos = Inlist(Int(Val(lcTipo)), 41, 43)
+
+    * 2. Detalle (solo ventas; gastos sintetiza adentro de BuildDoc)
+    If !llEsGastos
+      This._CargarDetalle(tcControl)
+    Endif
+
+    * 3. Empresa emisora
+    This._CargarEmpresa()
+
+    * 4. Tercero (cliente o suplidor) si entidad no vacia
+    If !Empty(lcEntidad)
+      This._CargarTerceroExtranjero(lcEntidad, llEsGastos)
+    Endif
+
+    * 5. Suplidor RNC (solo gastos sin RNC en maestro)
+    If llEsGastos And Empty(lcRncMae) And !Empty(lcEntidad)
+      This._CargarSuplidorRncNombre(lcEntidad)
+    Endif
+
+    * 6. Fiscal vence (solo si fechavencencf vacio)
+    If (Empty(ldFecVence) Or Isnull(ldFecVence)) And !Empty(lcTipo)
+      This._CargarFiscalVence(lcTipo)
+    Endif
+
+    * 7. Referencia (NC/ND/FCF con doc previo) si ocontrol no vacio
+    If !Empty(lcOcontrol)
+      This._CargarReferenciaImtr(lcOcontrol)
+    Endif
+  Endproc
+
   Function _CargarMaestro
     Lparameters tcControl
-    Local lcQ, lcSql
+    Local lcQ, lcSql, lcRaw, llFound
     If Vartype(tcControl) # "C"
       tcControl = ""
     Endif
     lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
-    ChalonaEcfUseInIfUsed("curChalMae")
+    lcRaw = "curChalMaeRaw"
+
+    * imtr primero
+    ChalonaEcfUseInIfUsed(lcRaw)
     lcSql = "SELECT * FROM dbo.imtr WHERE control = " + lcQ
-    If !Request(lcSql, "curChalMae")
-      ChalonaEcfLogError("SQL: imtr (maestro)", tcControl, lcSql)
+    llFound = .F.
+    If Request(lcSql, lcRaw) And Used(lcRaw) And Reccount(lcRaw) >= 1
+      llFound = .T.
+    Endif
+
+    * Fallback gastos
+    If !llFound
+      ChalonaEcfUseInIfUsed(lcRaw)
+      lcSql = "SELECT * FROM dbo.gastos WHERE control = " + lcQ
+      If Request(lcSql, lcRaw) And Used(lcRaw) And Reccount(lcRaw) >= 1
+        llFound = .T.
+      Endif
+    Endif
+
+    If !llFound
+      ChalonaEcfLogError("SQL: maestro (imtr/gastos)", tcControl, lcSql)
+      ChalonaEcfUseInIfUsed(lcRaw)
       Return ""
     Endif
-    If Used("curChalMae") And Reccount("curChalMae") >= 1
-      Return "curChalMae"
+
+    If !Used("curChalMae")
+      This.CrearCursores()
     Endif
-    ChalonaEcfUseInIfUsed("curChalMae")
-    lcSql = "SELECT * FROM dbo.gastos WHERE control = " + lcQ
-    If !Request(lcSql, "curChalMae")
-      ChalonaEcfLogError("SQL: gastos (maestro)", tcControl, lcSql)
-      Return ""
+    Select curChalMae
+    Zap
+
+    Select (lcRaw)
+    Go Top
+    Local lcFiscal, lcEncf, lcNcf, lcCtrlCol, ldFecha, lnValor, lnDesc, lnItbis
+    Local lnTotal, lnTasa, lcMoneda, lcRnc, lcNombre, lcEntidad, lcOcontrol
+    Local ldFechaVenc, lnCodMod, lnItbisr, lnIsr, lnDiascr
+    Local lcComentario, lcReferencia, lcDoc, lcNumero
+    lcFiscal     = Iif(Type("fiscal") # "U", Alltrim(Transform(Nvl(fiscal, ""))), "")
+    lcEncf       = Iif(Type("encf") # "U", Alltrim(Transform(Nvl(encf, ""))), "")
+    lcNcf        = Iif(Type("ncf") # "U", Alltrim(Transform(Nvl(ncf, ""))), "")
+    lcCtrlCol    = Iif(Type("control") # "U", Alltrim(Transform(Nvl(control, ""))), tcControl)
+    ldFecha      = Iif(Inlist(Type("fecha"), "D", "T"), Iif(Type("fecha")="T", Ttod(fecha), fecha), {/})
+    lnValor      = Iif(Type("valor") # "U", _ChalonaEcfNzNum(valor), 0)
+    lnDesc       = Iif(Type("descuento") # "U", _ChalonaEcfNzNum(descuento), 0)
+    lnItbis      = Iif(Type("itbis") # "U", _ChalonaEcfNzNum(itbis), 0)
+    lnTotal      = Iif(Type("total") # "U", _ChalonaEcfNzNum(total), 0)
+    lnTasa       = Iif(Type("tasa") # "U", _ChalonaEcfNzNum(tasa), 1)
+    If lnTasa < 1
+      lnTasa = 1
     Endif
+    lcMoneda     = Iif(Type("moneda") # "U", Alltrim(Transform(Nvl(moneda, ""))), "")
+    lcRnc        = Iif(Type("rnc") # "U", Alltrim(Transform(Nvl(rnc, ""))), "")
+    lcNombre     = Iif(Type("nombre") # "U", Alltrim(Transform(Nvl(nombre, ""))), "")
+    lcEntidad    = Iif(Type("entidad") # "U", Alltrim(Transform(Nvl(entidad, ""))), "")
+    lcOcontrol   = Iif(Type("ocontrol") # "U", Alltrim(Transform(Nvl(ocontrol, ""))), "")
+    ldFechaVenc  = Iif(Inlist(Type("fechavencencf"), "D", "T"), Iif(Type("fechavencencf")="T", Ttod(fechavencencf), fechavencencf), {/})
+    lnCodMod     = Iif(Type("dgii_codmod") # "U", _ChalonaEcfNzNum(dgii_codmod), 0)
+    lnItbisr     = Iif(Type("itbisr") # "U", _ChalonaEcfNzNum(itbisr), Iif(Type("itbir") # "U", _ChalonaEcfNzNum(itbir), 0))
+    lnIsr        = Iif(Type("isr") # "U", _ChalonaEcfNzNum(isr), 0)
+    lnDiascr     = Iif(Type("diascr") # "U", _ChalonaEcfNzNum(diascr), 0)
+    lcComentario = Iif(Type("comentario") # "U", Alltrim(Transform(Nvl(comentario, ""))), "")
+    lcReferencia = Iif(Type("referencia") # "U", Alltrim(Transform(Nvl(referencia, ""))), "")
+    lcDoc        = Iif(Type("doc") # "U", Alltrim(Transform(Nvl(doc, ""))), "")
+    lcNumero     = Iif(Type("numero") # "U", Alltrim(Transform(Nvl(numero, ""))), "")
+
+    Insert Into curChalMae ;
+      (fiscal, encf, ncf, control, fecha, valor, descuento, itbis, total, ;
+       tasa, moneda, rnc, nombre, entidad, ocontrol, fechavencencf, dgii_codmod, ;
+       itbisr, isr, diascr, comentario, referencia, doc, numero) ;
+      Values ( ;
+       Left(lcFiscal, 2), Left(lcEncf, 20), Left(lcNcf, 20), Left(lcCtrlCol, 40), ;
+       ldFecha, lnValor, lnDesc, lnItbis, lnTotal, ;
+       lnTasa, Left(lcMoneda, 10), Left(lcRnc, 20), Left(lcNombre, 150), ;
+       Left(lcEntidad, 20), Left(lcOcontrol, 40), ldFechaVenc, lnCodMod, ;
+       lnItbisr, lnIsr, lnDiascr, ;
+       Left(lcComentario, 200), Left(lcReferencia, 40), Left(lcDoc, 40), Left(lcNumero, 40))
+
+    ChalonaEcfUseInIfUsed(lcRaw)
+    Select curChalMae
     Return "curChalMae"
   Endfunc
 
   Function _CargarDetalle
     Lparameters tcControl
-    Local lcQ, lcSql
+    Local lcQ, lcSql, lcRaw
     If Vartype(tcControl) # "C"
       tcControl = ""
     Endif
     lcQ = _ChalonaSqlQuote(Alltrim(tcControl))
-    ChalonaEcfUseInIfUsed("curChalDet")
+    lcRaw = "curChalDetRaw"
+    ChalonaEcfUseInIfUsed(lcRaw)
     lcSql = "SELECT d.*, m.nombre AS mercs_nombre, ISNULL(m.servicio, 0) AS mercs_servicio " + ;
             "FROM dbo.imtrd d LEFT JOIN dbo.mercs m ON m.codigo = d.merc WHERE d.control = " + lcQ
-    If !Request(lcSql, "curChalDet")
+    If !Request(lcSql, lcRaw)
       ChalonaEcfLogError("SQL: imtrd+mercs (detalle)", tcControl, lcSql)
       Return ""
     Endif
+
+    If !Used("curChalDet")
+      This.CrearCursores()
+    Endif
+    Select curChalDet
+    Zap
+
+    Local lnPrecio, lnCantidad, lcDescrip, lcMercsNombre, lnMercsServicio
+    Local lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet
+    Select (lcRaw)
+    Scan
+      lnPrecio        = Iif(Type("precio") # "U", _ChalonaEcfNzNum(precio), 0)
+      lnCantidad      = Iif(Type("cantidad") # "U", _ChalonaEcfNzNum(cantidad), 0)
+      lcDescrip       = Iif(Type("descrip") # "U", Alltrim(Transform(Nvl(descrip, ""))), "")
+      lcMercsNombre   = Iif(Type("mercs_nombre") # "U", Alltrim(Transform(Nvl(mercs_nombre, ""))), "")
+      lnMercsServicio = Iif(Type("mercs_servicio") # "U", _ChalonaEcfNzNum(mercs_servicio), 0)
+      lnItbisLin      = Iif(Type("itbis") # "U", _ChalonaEcfNzNum(itbis), 0)
+      * itbisporc en imtrd o itbis_tasa en otros esquemas; 0 si ninguno.
+      lnItbisTasa     = Iif(Type("itbis_tasa") # "U", _ChalonaEcfNzNum(itbis_tasa), ;
+                             Iif(Type("itbisporc") # "U", _ChalonaEcfNzNum(itbisporc), 0))
+      lnItbisRet      = Iif(Type("itbis_retenido") # "U", _ChalonaEcfNzNum(itbis_retenido), 0)
+      lnIsrRet        = Iif(Type("isr_retenido") # "U", _ChalonaEcfNzNum(isr_retenido), 0)
+      Insert Into curChalDet ;
+        (precio, cantidad, descrip, mercs_nombre, mercs_servicio, itbis, itbis_tasa, itbis_retenido, isr_retenido) ;
+        Values (lnPrecio, lnCantidad, Left(lcDescrip, 200), Left(lcMercsNombre, 200), lnMercsServicio, lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet)
+    Endscan
+
+    ChalonaEcfUseInIfUsed(lcRaw)
+    Select curChalDet
     Return "curChalDet"
   Endfunc
 
   Function _CargarFiscalVence
     Lparameters tcTipoEcf
-    Local lcSql
+    Local lcSql, lcRaw, ldVence
     If Vartype(tcTipoEcf) # "C"
       tcTipoEcf = ""
     Endif
-    ChalonaEcfUseInIfUsed("curChalFis")
+    lcRaw = "curChalFisRaw"
+    ChalonaEcfUseInIfUsed(lcRaw)
     lcSql = "SELECT TOP 1 vence FROM dbo.fiscal WHERE codigo = " + _ChalonaSqlQuote(Alltrim(tcTipoEcf))
-    If !Request(lcSql, "curChalFis")
+    If !Request(lcSql, lcRaw)
       ChalonaEcfLogError("SQL: fiscal (vencimiento)", tcTipoEcf, lcSql)
       Return ""
     Endif
+    If !Used("curChalFis")
+      This.CrearCursores()
+    Endif
+    Select curChalFis
+    Zap
+    If Used(lcRaw) And Reccount(lcRaw) > 0
+      Select (lcRaw)
+      Go Top
+      ldVence = Iif(Inlist(Type("vence"), "D", "T"), Iif(Type("vence")="T", Ttod(vence), vence), {/})
+      Insert Into curChalFis (vence) Values (ldVence)
+    Endif
+    ChalonaEcfUseInIfUsed(lcRaw)
+    Select curChalFis
     Return "curChalFis"
   Endfunc
 
   Function _CargarEmpresa
-    Local lcSql
-    ChalonaEcfUseInIfUsed("curChalEmp")
+    Local lcSql, lcRaw
+    Local lcRnc, lcNombre, lcDir, lnIprecio
+    lcRaw = "curChalEmpRaw"
+    ChalonaEcfUseInIfUsed(lcRaw)
     lcSql = "SELECT TOP 1 rnc, nombre, direccion, iprecio FROM dbo.empresa"
-    If !Request(lcSql, "curChalEmp")
+    If !Request(lcSql, lcRaw)
       ChalonaEcfLogError("SQL: empresa (emisor)", "", lcSql)
       Return ""
     Endif
+    If !Used("curChalEmp")
+      This.CrearCursores()
+    Endif
+    Select curChalEmp
+    Zap
+    If Used(lcRaw) And Reccount(lcRaw) > 0
+      Select (lcRaw)
+      Go Top
+      lcRnc     = Iif(Type("rnc") # "U", Alltrim(Transform(Nvl(rnc, ""))), "")
+      lcNombre  = Iif(Type("nombre") # "U", Alltrim(Transform(Nvl(nombre, ""))), "")
+      lcDir     = Iif(Type("direccion") # "U", Alltrim(Transform(Nvl(direccion, ""))), "")
+      lnIprecio = Iif(Vartype(iprecio) = "L", Iif(iprecio, 1, 0), Iif(Type("iprecio") # "U", _ChalonaEcfNzNum(iprecio), 0))
+      Insert Into curChalEmp (rnc, nombre, direccion, iprecio) ;
+        Values (Left(lcRnc, 20), Left(lcNombre, 150), Left(lcDir, 200), lnIprecio)
+    Endif
+    ChalonaEcfUseInIfUsed(lcRaw)
+    Select curChalEmp
     Return "curChalEmp"
   Endfunc
 
   Function _CargarSuplidorRncNombre
     Lparameters tcCodigo
-    Local lcSql
+    Local lcSql, lcRaw, lcRnc, lcNombre
     If Vartype(tcCodigo) # "C"
       tcCodigo = ""
     Endif
-    ChalonaEcfUseInIfUsed("curChalSup")
+    lcRaw = "curChalSupRaw"
+    ChalonaEcfUseInIfUsed(lcRaw)
     lcSql = "SELECT TOP 1 rnc, nombre FROM dbo.suplidor WHERE codigo = " + _ChalonaSqlQuote(Alltrim(tcCodigo))
-    If !Request(lcSql, "curChalSup")
+    If !Request(lcSql, lcRaw)
       ChalonaEcfLogError("SQL: suplidor (rnc/nombre)", tcCodigo, lcSql)
       Return ""
     Endif
+    If !Used("curChalSup")
+      This.CrearCursores()
+    Endif
+    Select curChalSup
+    Zap
+    If Used(lcRaw) And Reccount(lcRaw) > 0
+      Select (lcRaw)
+      Go Top
+      lcRnc    = Iif(Type("rnc") # "U", Alltrim(Transform(Nvl(rnc, ""))), "")
+      lcNombre = Iif(Type("nombre") # "U", Alltrim(Transform(Nvl(nombre, ""))), "")
+      Insert Into curChalSup (rnc, nombre) ;
+        Values (Left(lcRnc, 20), Left(lcNombre, 150))
+    Endif
+    ChalonaEcfUseInIfUsed(lcRaw)
+    Select curChalSup
     Return "curChalSup"
   Endfunc
 
   Function _CargarTerceroExtranjero
     Lparameters tcCodigo, tlEsGastos
-    Local lcSql, lcCod
+    Local lcSql, lcCod, lcRaw, lnExtFlag, lcRnc, lcNombre
     If Vartype(tcCodigo) # "C"
       tcCodigo = ""
     Endif
@@ -2322,31 +2543,63 @@ Define Class ChalonaEcf As Custom
       tlEsGastos = .F.
     Endif
     lcCod = _ChalonaSqlQuote(Alltrim(tcCodigo))
-    ChalonaEcfUseInIfUsed("curChalCli")
+    lcRaw = "curChalCliRaw"
+    ChalonaEcfUseInIfUsed(lcRaw)
     If tlEsGastos
-      lcSql = "SELECT TOP 1 ISNULL(extranjero, 0) AS extranjero_flag FROM dbo.suplidor WHERE codigo = " + lcCod
+      lcSql = "SELECT TOP 1 ISNULL(extranjero, 0) AS extranjero_flag, '' AS rnc, '' AS nombre FROM dbo.suplidor WHERE codigo = " + lcCod
     Else
       lcSql = "SELECT TOP 1 ISNULL(extranjero, 0) AS extranjero_flag, rnc, nombre FROM dbo.clientes WHERE codigo = " + lcCod
     Endif
-    If !Request(lcSql, "curChalCli")
+    If !Request(lcSql, lcRaw)
       ChalonaEcfLogError("SQL: tercero (extranjero)", tcCodigo, lcSql)
       Return ""
     Endif
+    If !Used("curChalCli")
+      This.CrearCursores()
+    Endif
+    Select curChalCli
+    Zap
+    If Used(lcRaw) And Reccount(lcRaw) > 0
+      Select (lcRaw)
+      Go Top
+      lnExtFlag = Iif(Type("extranjero_flag") # "U", _ChalonaEcfNzNum(extranjero_flag), 0)
+      lcRnc     = Iif(Type("rnc") # "U", Alltrim(Transform(Nvl(rnc, ""))), "")
+      lcNombre  = Iif(Type("nombre") # "U", Alltrim(Transform(Nvl(nombre, ""))), "")
+      Insert Into curChalCli (extranjero_flag, rnc, nombre) ;
+        Values (lnExtFlag, Left(lcRnc, 20), Left(lcNombre, 150))
+    Endif
+    ChalonaEcfUseInIfUsed(lcRaw)
+    Select curChalCli
     Return "curChalCli"
   Endfunc
 
   Function _CargarReferenciaImtr
     Lparameters tcOcontrol
-    Local lcSql
+    Local lcSql, lcRaw, lcRefEncf, ldRefFecha
     If Vartype(tcOcontrol) # "C"
       tcOcontrol = ""
     Endif
-    ChalonaEcfUseInIfUsed("curChalRef")
+    lcRaw = "curChalRefRaw"
+    ChalonaEcfUseInIfUsed(lcRaw)
     lcSql = "SELECT TOP 1 encf, fecha FROM dbo.imtr WHERE control = " + _ChalonaSqlQuote(Alltrim(tcOcontrol))
-    If !Request(lcSql, "curChalRef")
+    If !Request(lcSql, lcRaw)
       ChalonaEcfLogError("SQL: imtr (referencia)", tcOcontrol, lcSql)
       Return ""
     Endif
+    If !Used("curChalRef")
+      This.CrearCursores()
+    Endif
+    Select curChalRef
+    Zap
+    If Used(lcRaw) And Reccount(lcRaw) > 0
+      Select (lcRaw)
+      Go Top
+      lcRefEncf  = Iif(Type("encf") # "U", Alltrim(Transform(Nvl(encf, ""))), "")
+      ldRefFecha = Iif(Inlist(Type("fecha"), "D", "T"), Iif(Type("fecha")="T", Ttod(fecha), fecha), {/})
+      Insert Into curChalRef (encf, fecha) Values (Left(lcRefEncf, 20), ldRefFecha)
+    Endif
+    ChalonaEcfUseInIfUsed(lcRaw)
+    Select curChalRef
     Return "curChalRef"
   Endfunc
 
@@ -2581,8 +2834,8 @@ Define Class ChalonaEcf As Custom
     Endif
     Create Cursor (lcCur) ;
       (control C(40), encf C(20), es_gastos L, ;
-       numero C(20), estado C(200), estado_descripcion C(500), ;
-       codigo_seguridad C(200), fecha_firma C(100), timbre C(500), ;
+       numero C(20), estado C(200), estado_descripcion M, ;
+       codigo_seguridad C(200), fecha_firma C(100), timbre M, ;
        secuencia_utilizada N(1), momento C(50))
     Select (lcRaw)
     Scan
