@@ -11,8 +11,9 @@ pubspec.lock
 chalona-ecf-v*.prg
 
 # .NET
-bin/
-obj/
+**/bin/Debug/
+**/bin/Release/
+**/obj/
 *.dll
 *.pdb
 *.user
@@ -23,6 +24,16 @@ obj/
 .idea/
 *.swp
 .DS_Store
+
+# Node / TypeScript
+node_modules/
+dist/
+package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
 
 # Local secrets / overrides
 .env

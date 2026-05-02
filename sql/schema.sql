@@ -422,3 +422,329 @@ BEGIN
   );
 END;
 $$;
+
+-- =============================================================================
+-- Cliente TypeScript (JS source UTF-8 ejecutado vía node:vm sandbox)
+-- =============================================================================
+--
+-- V8 no expone bytecode portable, así que el "bytecode" es JS source compilado
+-- con tsc. El cliente lo carga con vm.Script en sandbox sin require/fs/etc.
+-- Hot-swap = descartar handle y dejar GC liberar (no Unload real como C#).
+
+CREATE TABLE IF NOT EXISTS data.ts_cliente_driver (
+  id          serial PRIMARY KEY,
+  entorno     varchar(20)  NOT NULL CHECK (entorno IN ('produccion', 'test')),
+  version     integer      NOT NULL,
+  bytes       bytea        NOT NULL,
+  hash_sha256 char(64)     NOT NULL,
+  notas       text,
+  creado_en   timestamptz  NOT NULL DEFAULT now(),
+  activo      boolean      NOT NULL DEFAULT false
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ts_cliente_driver_activo_idx
+  ON data.ts_cliente_driver (entorno) WHERE activo = true;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ts_cliente_driver_entorno_version_idx
+  ON data.ts_cliente_driver (entorno, version);
+
+COMMENT ON TABLE data.ts_cliente_driver IS
+  'JS source (UTF-8) descargado por clientes TypeScript en runtime (node:vm sandbox).';
+
+-- Lookup: solo metadata (versión + hash). Barato.
+CREATE OR REPLACE FUNCTION fn.ts_cliente_driver_lookup(param jsonb)
+RETURNS TABLE(ok boolean, message text, data jsonb)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  entorno_in text;
+  rec        data.ts_cliente_driver;
+BEGIN
+  entorno_in := trim(coalesce(param->>'entorno', 'produccion'));
+  IF entorno_in NOT IN ('produccion', 'test') THEN
+    entorno_in := 'produccion';
+  END IF;
+
+  SELECT * INTO rec FROM data.ts_cliente_driver
+  WHERE entorno = entorno_in AND activo = true;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, 'ts_cliente_driver.no_disponible'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT true, 'ok'::text, jsonb_build_object(
+    'version',     rec.version,
+    'entorno',     rec.entorno,
+    'hash_sha256', rec.hash_sha256,
+    'tamano',      length(rec.bytes),
+    'creado_en',   rec.creado_en
+  );
+END;
+$$;
+
+-- Descarga: bytes en base64.
+CREATE OR REPLACE FUNCTION fn.ts_cliente_driver_descargar(param jsonb)
+RETURNS TABLE(ok boolean, message text, data jsonb)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  entorno_in text;
+  version_in integer;
+  rec        data.ts_cliente_driver;
+BEGIN
+  entorno_in := trim(coalesce(param->>'entorno', 'produccion'));
+  version_in := nullif(param->>'version', '')::integer;
+
+  IF entorno_in NOT IN ('produccion', 'test') THEN
+    entorno_in := 'produccion';
+  END IF;
+
+  IF version_in IS NULL THEN
+    SELECT * INTO rec FROM data.ts_cliente_driver
+    WHERE entorno = entorno_in AND activo = true;
+  ELSE
+    SELECT * INTO rec FROM data.ts_cliente_driver
+    WHERE entorno = entorno_in AND version = version_in;
+  END IF;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, 'ts_cliente_driver.version_no_existe'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT true, 'ok'::text, jsonb_build_object(
+    'version',     rec.version,
+    'entorno',     rec.entorno,
+    'hash_sha256', rec.hash_sha256,
+    'bytes_b64',   encode(rec.bytes, 'base64')
+  );
+END;
+$$;
+
+-- Publica nueva versión. Verifica hash sha256 contra los bytes.
+CREATE OR REPLACE FUNCTION fn.ts_cliente_driver_publicar(param jsonb)
+RETURNS TABLE(ok boolean, message text, data jsonb)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  entorno_in   text;
+  bytes_b64_in text;
+  hash_in      text;
+  notas_in     text;
+  bytes_bin    bytea;
+  nueva_ver    integer;
+  nuevo_id     integer;
+BEGIN
+  entorno_in   := trim(coalesce(param->>'entorno', ''));
+  bytes_b64_in := coalesce(param->>'bytes_b64', '');
+  hash_in      := lower(trim(coalesce(param->>'hash_sha256', '')));
+  notas_in     := nullif(trim(coalesce(param->>'notas', '')), '');
+
+  IF entorno_in NOT IN ('produccion', 'test') THEN
+    RETURN QUERY SELECT false,
+      'err.ts_cliente_driver_publicar.entorno_invalido'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+  IF bytes_b64_in = '' THEN
+    RETURN QUERY SELECT false,
+      'err.ts_cliente_driver_publicar.bytes_vacio'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+  IF hash_in !~ '^[0-9a-f]{64}$' THEN
+    RETURN QUERY SELECT false,
+      'err.ts_cliente_driver_publicar.hash_invalido'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+
+  bytes_bin := decode(bytes_b64_in, 'base64');
+
+  IF encode(digest(bytes_bin, 'sha256'), 'hex') <> hash_in THEN
+    RETURN QUERY SELECT false,
+      'err.ts_cliente_driver_publicar.hash_invalido'::text,
+      jsonb_build_object('hash_recibido',  hash_in,
+                         'hash_calculado', encode(digest(bytes_bin, 'sha256'), 'hex'));
+    RETURN;
+  END IF;
+
+  SELECT coalesce(max(version), 0) + 1 INTO nueva_ver
+  FROM data.ts_cliente_driver WHERE entorno = entorno_in;
+
+  UPDATE data.ts_cliente_driver SET activo = false
+  WHERE entorno = entorno_in AND activo = true;
+
+  INSERT INTO data.ts_cliente_driver
+    (entorno, version, bytes, hash_sha256, notas, activo)
+  VALUES
+    (entorno_in, nueva_ver, bytes_bin, hash_in, notas_in, true)
+  RETURNING id INTO nuevo_id;
+
+  RETURN QUERY SELECT true, 'ok'::text, jsonb_build_object(
+    'id',          nuevo_id,
+    'version',     nueva_ver,
+    'entorno',     entorno_in,
+    'tamano',      length(bytes_bin),
+    'hash_sha256', hash_in
+  );
+END;
+$$;
+
+-- =============================================================================
+-- Cliente Python (.py source UTF-8 ejecutado vía exec en namespace aislado)
+-- =============================================================================
+--
+-- .pyc varía por versión de intérprete, así que ship .py source. El cliente
+-- lo carga con exec() en un dict aislado al que se le inyecta la base
+-- ComprobanteDriver para que el driver pueda heredar sin importar el paquete.
+
+CREATE TABLE IF NOT EXISTS data.python_cliente_driver (
+  id          serial PRIMARY KEY,
+  entorno     varchar(20)  NOT NULL CHECK (entorno IN ('produccion', 'test')),
+  version     integer      NOT NULL,
+  bytes       bytea        NOT NULL,
+  hash_sha256 char(64)     NOT NULL,
+  notas       text,
+  creado_en   timestamptz  NOT NULL DEFAULT now(),
+  activo      boolean      NOT NULL DEFAULT false
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS python_cliente_driver_activo_idx
+  ON data.python_cliente_driver (entorno) WHERE activo = true;
+
+CREATE UNIQUE INDEX IF NOT EXISTS python_cliente_driver_entorno_version_idx
+  ON data.python_cliente_driver (entorno, version);
+
+COMMENT ON TABLE data.python_cliente_driver IS
+  'Source .py (UTF-8) descargado por clientes Python en runtime (exec en namespace aislado).';
+
+-- Lookup
+CREATE OR REPLACE FUNCTION fn.python_cliente_driver_lookup(param jsonb)
+RETURNS TABLE(ok boolean, message text, data jsonb)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  entorno_in text;
+  rec        data.python_cliente_driver;
+BEGIN
+  entorno_in := trim(coalesce(param->>'entorno', 'produccion'));
+  IF entorno_in NOT IN ('produccion', 'test') THEN
+    entorno_in := 'produccion';
+  END IF;
+
+  SELECT * INTO rec FROM data.python_cliente_driver
+  WHERE entorno = entorno_in AND activo = true;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, 'python_cliente_driver.no_disponible'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT true, 'ok'::text, jsonb_build_object(
+    'version',     rec.version,
+    'entorno',     rec.entorno,
+    'hash_sha256', rec.hash_sha256,
+    'tamano',      length(rec.bytes),
+    'creado_en',   rec.creado_en
+  );
+END;
+$$;
+
+-- Descarga
+CREATE OR REPLACE FUNCTION fn.python_cliente_driver_descargar(param jsonb)
+RETURNS TABLE(ok boolean, message text, data jsonb)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  entorno_in text;
+  version_in integer;
+  rec        data.python_cliente_driver;
+BEGIN
+  entorno_in := trim(coalesce(param->>'entorno', 'produccion'));
+  version_in := nullif(param->>'version', '')::integer;
+
+  IF entorno_in NOT IN ('produccion', 'test') THEN
+    entorno_in := 'produccion';
+  END IF;
+
+  IF version_in IS NULL THEN
+    SELECT * INTO rec FROM data.python_cliente_driver
+    WHERE entorno = entorno_in AND activo = true;
+  ELSE
+    SELECT * INTO rec FROM data.python_cliente_driver
+    WHERE entorno = entorno_in AND version = version_in;
+  END IF;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, 'python_cliente_driver.version_no_existe'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT true, 'ok'::text, jsonb_build_object(
+    'version',     rec.version,
+    'entorno',     rec.entorno,
+    'hash_sha256', rec.hash_sha256,
+    'bytes_b64',   encode(rec.bytes, 'base64')
+  );
+END;
+$$;
+
+-- Publica
+CREATE OR REPLACE FUNCTION fn.python_cliente_driver_publicar(param jsonb)
+RETURNS TABLE(ok boolean, message text, data jsonb)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  entorno_in   text;
+  bytes_b64_in text;
+  hash_in      text;
+  notas_in     text;
+  bytes_bin    bytea;
+  nueva_ver    integer;
+  nuevo_id     integer;
+BEGIN
+  entorno_in   := trim(coalesce(param->>'entorno', ''));
+  bytes_b64_in := coalesce(param->>'bytes_b64', '');
+  hash_in      := lower(trim(coalesce(param->>'hash_sha256', '')));
+  notas_in     := nullif(trim(coalesce(param->>'notas', '')), '');
+
+  IF entorno_in NOT IN ('produccion', 'test') THEN
+    RETURN QUERY SELECT false,
+      'err.python_cliente_driver_publicar.entorno_invalido'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+  IF bytes_b64_in = '' THEN
+    RETURN QUERY SELECT false,
+      'err.python_cliente_driver_publicar.bytes_vacio'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+  IF hash_in !~ '^[0-9a-f]{64}$' THEN
+    RETURN QUERY SELECT false,
+      'err.python_cliente_driver_publicar.hash_invalido'::text, '{}'::jsonb;
+    RETURN;
+  END IF;
+
+  bytes_bin := decode(bytes_b64_in, 'base64');
+
+  IF encode(digest(bytes_bin, 'sha256'), 'hex') <> hash_in THEN
+    RETURN QUERY SELECT false,
+      'err.python_cliente_driver_publicar.hash_invalido'::text,
+      jsonb_build_object('hash_recibido',  hash_in,
+                         'hash_calculado', encode(digest(bytes_bin, 'sha256'), 'hex'));
+    RETURN;
+  END IF;
+
+  SELECT coalesce(max(version), 0) + 1 INTO nueva_ver
+  FROM data.python_cliente_driver WHERE entorno = entorno_in;
+
+  UPDATE data.python_cliente_driver SET activo = false
+  WHERE entorno = entorno_in AND activo = true;
+
+  INSERT INTO data.python_cliente_driver
+    (entorno, version, bytes, hash_sha256, notas, activo)
+  VALUES
+    (entorno_in, nueva_ver, bytes_bin, hash_in, notas_in, true)
+  RETURNING id INTO nuevo_id;
+
+  RETURN QUERY SELECT true, 'ok'::text, jsonb_build_object(
+    'id',          nuevo_id,
+    'version',     nueva_ver,
+    'entorno',     entorno_in,
+    'tamano',      length(bytes_bin),
+    'hash_sha256', hash_in
+  );
+END;
+$$;

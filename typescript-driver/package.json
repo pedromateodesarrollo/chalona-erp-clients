@@ -1,0 +1,18 @@
+{
+  "name": "@chalona/typescript-driver",
+  "version": "0.1.0",
+  "description": "Cliente TypeScript para e-CF con hot-reload de driver via Postgres (espejo de dart-driver y csharp-driver)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "compilar": "tsc -p tsconfig.json && node dist/bin/compilar.js",
+    "prueba": "tsc -p tsconfig.json && node dist/bin/prueba-comprobantes-driver.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}

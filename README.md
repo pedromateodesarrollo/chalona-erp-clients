@@ -52,6 +52,8 @@ data.
 | [`fox/`](fox/) | Cliente Visual FoxPro — para ERPs legados que ya corren en VFP |
 | [`dart-driver/`](dart-driver/) | Cliente Dart — para apps modernas (Flutter / Dart server / CLI) |
 | [`csharp/`](csharp/) | Cliente C# / .NET — Roslyn + AssemblyLoadContext, hot-swap real con `Unload()` |
+| [`typescript-driver/`](typescript-driver/) | Cliente TypeScript — JS source via `node:vm` sandbox, sin deps de runtime |
+| [`python-driver/`](python-driver/) | Cliente Python — `.py` source via `exec()` en namespace aislado, stdlib only |
 | [`sql/`](sql/) | Schema Postgres standalone (tablas + funciones) |
 | [`docs/`](docs/) | Arquitectura, quickstarts, limitaciones |
 
@@ -95,6 +97,28 @@ cd csharp
 dotnet build
 PG_HOST=localhost PG_DB=midb ./publicar.sh
 dotnet run --project src/ChalonaCsDriver.Cli
+```
+
+### 5. Cliente TypeScript
+
+Ver [docs/typescript-quickstart.md](docs/typescript-quickstart.md).
+
+```bash
+cd typescript-driver
+PG_HOST=localhost PG_DB=midb ./publicar.sh
+PG_HOST=localhost PG_DB=midb ENTORNO=test \
+  node dist/bin/prueba-comprobantes-driver.js
+```
+
+### 6. Cliente Python
+
+Ver [docs/python-quickstart.md](docs/python-quickstart.md).
+
+```bash
+cd python-driver
+PG_HOST=localhost PG_DB=midb ./publicar.sh
+PG_HOST=localhost PG_DB=midb ENTORNO=test \
+  python3 bin/prueba_comprobantes_driver.py
 ```
 
 ## Arquitectura
@@ -160,6 +184,8 @@ No polling. No push notifications. No installers. Logic ships with data.
 | `fox/` | Visual FoxPro client — for legacy ERPs already on VFP |
 | `dart-driver/` | Dart client — for modern apps (Flutter / Dart server / CLI) |
 | `csharp/` | C# / .NET client — Roslyn + AssemblyLoadContext, real `Unload()` hot-swap |
+| `typescript-driver/` | TypeScript client — JS source via `node:vm` sandbox, no runtime deps |
+| `python-driver/` | Python client — `.py` source via `exec()` in isolated namespace, stdlib only |
 | `sql/` | Standalone Postgres schema (tables + functions) |
 | `docs/` | Architecture, quickstarts, limitations |
 
@@ -181,6 +207,18 @@ dart run bin/poc_postgres.dart
 cd csharp && dotnet build
 PG_HOST=localhost PG_DB=mydb ./publicar.sh
 dotnet run --project src/ChalonaCsDriver.Cli
+
+# 5. Publish a driver (TypeScript)
+cd typescript-driver
+PG_HOST=localhost PG_DB=mydb ./publicar.sh
+PG_HOST=localhost PG_DB=mydb ENTORNO=test \
+  node dist/bin/prueba-comprobantes-driver.js
+
+# 6. Publish a driver (Python)
+cd python-driver
+PG_HOST=localhost PG_DB=mydb ./publicar.sh
+PG_HOST=localhost PG_DB=mydb ENTORNO=test \
+  python3 bin/prueba_comprobantes_driver.py
 ```
 
 See [`docs/`](docs/) for details and trade-offs.
