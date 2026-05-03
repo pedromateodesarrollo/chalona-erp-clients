@@ -38,3 +38,22 @@ __pycache__/
 # Local secrets / overrides
 .env
 *.local.sh
+
+# Carpetas internas fsd (no van al repo público)
+publisher/
+python/
+fox/alberto/
+fox/vfp-runner/
+fox/vfp-runner.zip
+dart-driver/lib/postgres_source.dart
+dart-driver/lib/server_simulado.dart
+dart-driver/bin/poc.dart
+dart-driver/bin/poc_postgres.dart
+dart-driver/bin/prueba_comprobantes_driver.dart
+dart-driver/bin/test_ecf.dart
+dart-driver/driver_src/driver_v1.dart
+dart-driver/driver_src/driver_v2.dart
+dart-driver/driver_src/driver_ecf.dart
+dart-driver/driver_src/driver_prueba_comprobantes_v1.dart
+dart-driver/driver_src/driver_prueba_comprobantes_v2.dart
+csharp/tests/

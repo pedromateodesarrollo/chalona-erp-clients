@@ -355,6 +355,16 @@ Function ChalonaEcfBuildDocJsonFox
   Else
     lcEncf = Alltrim(Transform(Nvl(encf, "")))
   Endif
+  * Validar prefijo eNCF coincide con TipoeCF (DGII error 75).
+  * eNCF debe comenzar con "E" + TipoeCF (ej: TipoeCF=32 → E32...).
+  If !Empty(lcEncf) And !Empty(lcTipoeCF)
+    If Left(lcEncf, 1 + Len(Alltrim(lcTipoeCF))) # "E" + Alltrim(lcTipoeCF)
+      ChalonaEcfLogError("ECF: eNCF '" + lcEncf + "' no coincide con TipoeCF " + lcTipoeCF + " (prefijo esperado: E" + Alltrim(lcTipoeCF) + "). DGII error 75.", tcControl, "")
+      gcChalonaEcfBuildDocError = "ecf.encf_tipo_no_coincide"
+      llNull = .T.
+      Exit
+    Endif
+  Endif
   ldFecEmi = fecha
   lnDiasCr = _ChalonaEcfNzNum(diascr)
   lnValor = _ChalonaEcfNzNum(valor)

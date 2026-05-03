@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>EcfClient</RootNamespace>
+    <AssemblyName>EcfClient</AssemblyName>
+    <Version>0.1.0</Version>
+    <PackageId>EcfClient</PackageId>
+    <Description>Cliente C# para el API ecf-service (e-CF DGII República Dominicana)</Description>
+    <Authors>Chalona</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>ecf;dgii;comprobantes-fiscales;republica-dominicana;api-client</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
