@@ -17,8 +17,12 @@ var entorno = args.Length > 0 ? args[0] : "test";
 var rnc = args.Length > 1 ? args[1] : "133084503";
 
 var (host, port, db, user, pass) = entorno == "produccion"
-    ? ("localhost", 5432, "produccion", "pedro", "chalona@1844")
-    : ("localhost", 5433, "test", "pedro", "camila");
+    ? ("localhost", 5432, "produccion",
+       Environment.GetEnvironmentVariable("CHALONA_PROD_USER") ?? "pedro",
+       Environment.GetEnvironmentVariable("CHALONA_PROD_PASS") ?? throw new InvalidOperationException("Set env var CHALONA_PROD_PASS"))
+    : ("localhost", 5433, "test",
+       Environment.GetEnvironmentVariable("CHALONA_TEST_USER") ?? "pedro",
+       Environment.GetEnvironmentVariable("CHALONA_TEST_PASS") ?? "camila");
 
 Console.WriteLine($"=== prueba-comprobantes-driver C# — entorno=\"{entorno}\" (BD {db} en {host}:{port}) ===");
 
