@@ -3,7 +3,7 @@
 
 import 'dart:io';
 
-import 'package:chalona_dart_driver/loader.dart';
+import 'package:dart_driver_poc/loader.dart';
 
 void main(List<String> args) {
   if (args.length != 2) {

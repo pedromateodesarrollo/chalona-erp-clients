@@ -2,147 +2,177 @@
 
 ## Audiencia
 
-Esta guía es para un **integrador** que quiere consumir el motor Dart
-hot-reload publicado por Chalona desde una app Dart / Flutter / Dart server.
-Tú no hospedás Postgres ni publicás nada — Chalona ya lo hizo. Tu app
-solo se conecta a la BD de Chalona y baja el driver.
+Esta guía es para un **integrador** que quiere consumir el API Chalona ECF desde una app Dart / Flutter / Dart server.
 
-Si querés hospedar tu propio motor (forkear el patrón hot-reload para tu
-producto), saltá al final: [Self-hosting (avanzado)](#self-hosting-avanzado).
+Tú no hospedás Postgres ni publicás nada — Chalona ya lo hizo. Tu app solo hace HTTPS contra `https://ecf-service.vicortiz.com` y deja que el cliente shell + motor manejen todo.
 
 ## Pre-requisitos
 
-- Dart SDK 3.4+
-- Acceso de red a la BD Postgres de Chalona (host, port, db, user, pass —
-  provistos por Chalona)
+- Dart SDK **3.4+**
+- Acceso de red a `https://ecf-service.vicortiz.com` (puerto 443)
+- Credenciales de usuario ECF (correo + clave) provistas por Chalona
 
-**No necesitás aplicar schema ni publicar nada.** El motor vive en la BD
-de Chalona y se baja a tu app via lookup.
+**Sin Postgres.** Sin schema. Sin credenciales de base de datos.
 
-## 1. Instalar dependencias
+## Instalación
+
+`pubspec.yaml`:
+
+```yaml
+dependencies:
+  dart_driver_poc:
+    path: ../path/al/chalona-ecf/dart-driver
+  # o (cuando esté en pub.dev):
+  # dart_driver_poc: ^1.0.0
+```
 
 ```bash
-cd dart-driver
 dart pub get
 ```
 
-## 2. Configurar conexión
+## Uso mínimo
 
 ```dart
-import 'package:chalona_dart_driver/loader.dart';
-import 'package:chalona_dart_driver/postgres_source.dart';
+import 'package:dart_driver_poc/ecf_client.dart';
 
-final source = PostgresDriverSource(
-  host:     '<host_provisto_por_chalona>',
-  port:     5432,
-  database: '<db_provista>',
-  username: '<usuario_provisto>',
-  password: '<clave_provista>',
-  entorno:  'test',   // o 'produccion'
-);
-```
+Future<void> main() async {
+  // Para producción:
+  final client = EcfClient();  // baseUrl=https://ecf-service.vicortiz.com, motorEntorno='produccion'
 
-## 3. Bajar el driver y usarlo
+  // 1. Login (obtiene token Bearer y lo guarda interno).
+  await client.login('mi_correo@empresa.com', 'mi_clave');
 
-```dart
-DriverHandle? driver;
+  // 2. Construir un comprobante con datos de tu ERP.
+  final doc = DocumentoEcf(
+    fiscal: '31',                          // Factura Crédito Fiscal
+    encf: 'E310000000001',                 // e-NCF asignado por tu lógica
+    fecha: DateTime.now(),
+    moneda: 'DOP',
+    valor: 1000.00,
+    itbis: 180.00,
+    total: 1180.00,
+    emisor: EmisorEcf(
+      rnc: '131996035',
+      nombre: 'Mi Empresa SRL',
+      direccion: 'Calle Principal #1, Santo Domingo',
+    ),
+    comprador: CompradorEcf(
+      rnc: '01800451302',                  // 9 dígitos (RNC) o 11 (cédula)
+      nombre: 'Cliente SA',
+    ),
+    lineas: [
+      LineaEcf(
+        descripcion: 'Servicio de consultoría',
+        cantidad: 1,
+        precio: 1000.00,
+        itbis: 180.00,
+        itbisTasa: 18,
+        esServicio: true,
+      ),
+    ],
+  );
 
-Future<dynamic> ejecutar(String fn, List<Object?> args) async {
-  final meta = await source.lookup();
-  if (meta == null) throw StateError('no driver activo');
-  if (driver?.version != 'v${meta.version}') {
-    final bytes = await source.descargar();
-    driver = cargarDriver(bytes: bytes, version: 'v${meta.version}');
-    if (driver!.hash != meta.hashSha256) throw StateError('hash mismatch');
-  }
-  return driver!.call(fn, args);
+  // 3. Enviar a DGII (motor arma payload + firma + envía).
+  final enviado = await client.enviaEcfDesde(doc, portal: 'testecf');
+
+  print('estado:           ${enviado.estado}');           // 'Aceptado' / 'En Proceso'
+  print('códigoSeguridad:  ${enviado.codigoSeguridad}');
+  print('timbre:           ${enviado.timbre}');
+  print('fechaFirma:       ${enviado.fechaFirma}');
+
+  // 4. Persistir resultado en tu ERP (tu código).
+  await miErp.actualizarFactura(controlInterno, enviado);
+
+  // 5. Cerrar HTTP client.
+  client.close();
 }
-
-// Pre-validar un comprobante e-CF
-final res = await ejecutar('preValidar', [comprobanteJson]);
 ```
 
-En producción agregá: cache local en disco, retry con backoff, fallback
-al driver cacheado si el lookup falla por red.
+## Cómo funciona internamente
 
-## Demos incluidas
+1. Tu código → `client.enviaEcfDesde(doc, portal: 'testecf')`.
+2. Cliente shell hace lazy-load del motor (lookup HTTP + descarga bytecode + verifica sha256).
+3. Motor (corriendo en runtime sandbox) recibe `documento`, valida, arma payload DGII (XML/JSON con `Encabezado`, `DetallesItems`, `Totales`, etc.).
+4. Cliente shell hace `POST /` a `https://ecf-service.vicortiz.com` con el payload y el token Bearer.
+5. Server-ecf firma con certificado P12 de tu empresa, envía a DGII.
+6. Respuesta vuelve por la cadena → motor parsea → cliente shell devuelve `DocumentoEcf` enriquecido (con `encf`, `estado`, `timbre`, …).
+
+**Auto-actualización del motor:** el cliente shell envía `dart_driver_version` en cada request. Si Chalona publica una nueva versión, el server responde `dart_cliente_driver.version_desactualizada` y el shell la baja automáticamente y reintenta. Tu código no se entera.
+
+## Tipos de comprobante
+
+| TipoeCF | Descripción              |
+|---------|--------------------------|
+| `31`    | Factura Crédito Fiscal   |
+| `32`    | Factura de Consumo       |
+| `33`    | Nota de Débito           |
+| `34`    | Nota de Crédito          |
+| `41`    | Compras (con retenciones)|
+| `43`    | Gastos Menores           |
+| `44`    | Régimen Especial         |
+| `45`    | Gubernamental            |
+| `46`    | Exportación              |
+| `47`    | Pagos al Exterior        |
+
+Ver `chalona-ecf/dart-driver/README.md` para ejemplos por cada tipo (con/sin ITBIS, NC con tope, compras con retención ISR).
+
+## Métodos del cliente
+
+| Método                                  | Descripción                                              |
+|-----------------------------------------|----------------------------------------------------------|
+| `login(usuario, clave)`                 | Auth — guarda token Bearer interno.                       |
+| `enviaEcfDesde(doc, portal)`            | Envía un `DocumentoEcf`; motor arma el payload.          |
+| `enviaEcf(rnc, portal, json)`           | Envía con payload DGII completo armado por el integrador.|
+| `consultaEstado(comprobantes)`          | Lista de hasta 100 e-NCFs → estado por cada uno.         |
+| `descargaXmls(desde, hasta, {tipos})`   | ZIP con XMLs firmados del rango (YYYY-MM-DD).            |
+| `clearToken()`                          | Limpia token (para forzar re-login).                     |
+| `close()`                               | Cierra HTTP client.                                       |
+
+## Manejo de errores
+
+```dart
+try {
+  await client.enviaEcfDesde(doc, portal: 'testecf');
+} on EcfApiError catch (e) {
+  print('código: ${e.code}');
+  print('detalle: ${e.data}');
+  // p.ej. e.code == 'err.sistema_login.credenciales_invalidas'
+  //       e.code == 'motor.envia_doc.fiscal_requerido'
+  //       e.code == 'ecf.formato_rnc'
+}
+```
+
+## Demo end-to-end
 
 ```bash
-dart run bin/poc_postgres.dart                  # end-to-end contra Postgres
-dart run bin/prueba_comprobantes_driver.dart    # 9 comprobantes mock vs driver
-dart run bin/poc.dart                            # hot-swap en memoria (sin BD)
-dart run bin/test_ecf.dart                       # validador e-CF en eval (sin BD)
+cd chalona-ecf/dart-driver
+dart pub get
+dart run bin/demo_envio.dart
 ```
 
-## Estructura del cliente
+Variables de entorno opcionales:
 
+```bash
+ECF_USER=mi@empresa.com
+ECF_PASS=mi_clave
+ECF_RNC_EMISOR=131996035
+ECF_PORTAL=testecf                                   # 'testecf' o 'ecf'
+# ECF_BASE_URL=http://localhost:3030                 # solo para self-hosting
 ```
-dart-driver/
-├── pubspec.yaml
-├── publicar.sh                   # solo si self-hosting
-├── lib/
-│   ├── loader.dart               # compilar/cargar/cache
-│   └── postgres_source.dart      # cliente Postgres (lookup + descarga)
-├── bin/
-│   ├── poc.dart
-│   ├── poc_postgres.dart
-│   ├── test_ecf.dart
-│   ├── prueba_comprobantes_driver.dart
-│   └── compilar.dart
-└── driver_src/                   # solo relevante si self-hosting
-    ├── driver_ecf.dart
-    ├── driver_v1.dart
-    ├── driver_v2.dart
-    ├── driver_prueba_comprobantes_v1.dart
-    └── driver_prueba_comprobantes_v2.dart
-```
-
-## Limitaciones
-
-Antes de meter lógica al driver (solo aplica si self-hosting), lee
-[`dart-eval-limitations.md`](dart-eval-limitations.md). El intérprete
-soporta la mayor parte de Dart pero hay gaps (ej. `num.round()` no está,
-`num` como tipo de parámetro tiene boxing inconsistente).
-
----
 
 ## Self-hosting (avanzado)
 
-Solo si querés hospedar tu propio motor. Caso típico: NO necesario para
-integradores Chalona.
+Si querés hospedar tu propio motor (forkear el patrón hot-reload para tu producto):
 
-### Pre-requisitos extra
+1. Aplicar `chalona-ecf/sql/schema.sql` a tu Postgres.
+2. Levantar tu propio server-ecf.
+3. Usar `bin/actualiza-cliente-dart` (en el monorepo Chalona) para publicar versiones del motor.
+4. Apuntar el cliente con `EcfClient(baseUrl: 'https://tu-dominio.com', motorEntorno: 'test')`.
 
-- Postgres con el [schema](../sql/schema.sql) aplicado
-- `psql` y `python3` en el PATH
+Para integradores normales esto **no aplica** — solo necesitás las credenciales de usuario.
 
-### 1. Aplicar schema
+## Referencias
 
-```bash
-psql -h localhost -U postgres -d midb -f ../sql/schema.sql
-```
-
-### 2. Publicar la primera versión
-
-`driver_src/driver_ecf.dart` contiene la lógica del driver (validadores
-e-CF puros). Compilá y publicá con:
-
-```bash
-PG_HOST=localhost PG_PORT=5432 PG_DB=midb \
-PG_USER=postgres PG_PASS=secret \
-  ./publicar.sh
-```
-
-Esto:
-1. Compila `driver_src/driver_ecf.dart` → bytecode `.evc` con `dart_eval`
-2. Calcula sha256
-3. Llama `fn.dart_cliente_driver_publicar` (verifica hash server-side)
-4. Inserta como versión activa en `entorno='test'`
-
-Para producción: `./publicar.sh --produccion`. Para otro driver fuente:
-`./publicar.sh --fuente=driver_src/driver_prueba_comprobantes_v2.dart`.
-
-### 3. Hot-reload
-
-Modificá el driver fuente. Republicá. La próxima llamada del cliente
-detecta la versión nueva y la baja.
+- Cliente Dart: `chalona-ecf/dart-driver/README.md` (API completa + ejemplos por tipo).
+- Limitaciones de `dart_eval` (runtime del motor): `chalona-ecf/docs/dart-eval-limitations.md`.
+- Arquitectura general: `chalona-ecf/docs/architecture.md`.
