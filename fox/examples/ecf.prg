@@ -208,7 +208,7 @@ ecf.sync_ecf()
 		           liResult = 4
 		      CASE ALLTRIM(UPPER(lcEstado)) == ALLTRIM(UPPER("Rechazado"))
 		           liResult = 5
-		      CASE ALLTRIM(UPPER(lcEstado)) == ALLTRIM(UPPER("Sin Estado"))
+		      CASE ALLTRIM(UPPER(lcEstado)) == ALLTRIM(UPPER("Sinï¿½Estado"))
 		           liResult = 6
 		   OTHERWISE 
 	               liResult = 9
@@ -546,7 +546,7 @@ ecf.sync_ecf()
 						"IdentificadorExtranjero":"<<ALLTRIM(cliente_id_extranjero)>>",
 						"RazonSocialComprador":"<<t(cliente_razon_social)>>",
 						"ContactoComprador":"<<t(cliente_contacto)>>",
-						"CorreoComprador":"<<t(cliente_correo)>>",
+						"CorreoComprador":"<<Iif(AT('@', t(cliente_correo)) > 0, t(cliente_correo), '')>>",
 						"DireccionComprador":"<<t(cliente_direccion)>>",
 						"PaisComprador":"<<t(cliente_pais)>>",
 						"FechaEntrega":"<<this.date_format(cliente_fecha_entrega)>>",
