@@ -182,6 +182,18 @@ class EcfClient {
     DocumentoEcf documento, {
     required String portal,
   }) async {
+    // Validación anticipada: prefijo eNCF debe coincidir con TipoeCF (DGII error 75).
+    final encfVal = documento.encf?.trim() ?? '';
+    final fiscalVal = documento.fiscal.trim();
+    if (encfVal.isNotEmpty && fiscalVal.isNotEmpty) {
+      final prefijoCorrecto = 'E$fiscalVal';
+      if (!encfVal.startsWith(prefijoCorrecto)) {
+        throw ArgumentError(
+          'eNCF "$encfVal" no coincide con TipoeCF $fiscalVal '
+          '(prefijo esperado: $prefijoCorrecto). DGII error 75.',
+        );
+      }
+    }
     final r = await _dispatch('enviaEcfDesdeDoc', {
       'documento': documento.toMap(),
       'portal': portal,
