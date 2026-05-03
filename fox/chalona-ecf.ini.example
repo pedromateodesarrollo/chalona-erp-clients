@@ -1,0 +1,11 @@
+; Modulo Chalona ECF integrado en el ERP (chalona-ecf.prg).
+; SQL: Request() del proyecto. Config de sync en Public osis: servidor_ecf, usuario_sync,
+; pass_sync, portal_dgii.
+;
+; Opcional. Solo si osis.servidor_ecf esta vacio: URL base del API Chalona (ecf).
+
+[api]
+baseurl=http://192.168.1.3:3030/
+
+; Ruta del INI: por defecto Sys(16)\chalona-ecf.ini; o Public gcChalonaEcfIniPath antes de
+; ChalonaEcfResolverServidorEcf / ChalonaEcfIniRead.
