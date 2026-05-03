@@ -12,7 +12,7 @@ set -euo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 DRIVER_DIR="$(dirname "$SCRIPT_PATH")"
-FUENTE_DEFAULT="$DRIVER_DIR/driver_src/DriverComprobantes.cs"
+FUENTE_DEFAULT="$DRIVER_DIR/driver_src/MotorEcfV1.cs"
 
 PG_HOST="${PG_HOST:-localhost}"
 PG_PORT="${PG_PORT:-5432}"

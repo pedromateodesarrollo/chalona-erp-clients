@@ -24,8 +24,8 @@ public static class DriverCompiler
             .Cast<MetadataReference>()
             .ToList();
 
-        // Agregar el ensamblado de la interfaz IComprobanteDriver
-        refs.Add(MetadataReference.CreateFromFile(typeof(IComprobanteDriver).Assembly.Location));
+        // Agregar el ensamblado de la interfaz IMotorEcf
+        refs.Add(MetadataReference.CreateFromFile(typeof(IMotorEcf).Assembly.Location));
 
         var compilation = CSharpCompilation.Create(
             assemblyName: nombreEnsamblado,
@@ -48,7 +48,7 @@ public static class DriverCompiler
 }
 
 /// <summary>
-/// Handle a un driver cargado en runtime. Permite invocar PreValidar.
+/// Handle a un motor cargado en runtime. Permite invocar Procesar (trampolín).
 /// El AssemblyLoadContext es <c>collectible: true</c>, así que <see cref="Unload"/>
 /// libera memoria de verdad (esto es lo que dart_eval no puede hacer).
 /// </summary>
@@ -56,10 +56,10 @@ public sealed class DriverHandle : IDisposable
 {
     public string Version { get; }
     public string HashSha256 { get; }
-    public IComprobanteDriver Instancia { get; }
+    public IMotorEcf Instancia { get; }
     private readonly AssemblyLoadContext _ctx;
 
-    private DriverHandle(string version, string hash, IComprobanteDriver instancia, AssemblyLoadContext ctx)
+    private DriverHandle(string version, string hash, IMotorEcf instancia, AssemblyLoadContext ctx)
     {
         Version = version;
         HashSha256 = hash;
@@ -78,11 +78,11 @@ public sealed class DriverHandle : IDisposable
         }
 
         var tipoDriver = asm.GetTypes()
-            .FirstOrDefault(t => typeof(IComprobanteDriver).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
+            .FirstOrDefault(t => typeof(IMotorEcf).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
             ?? throw new InvalidOperationException(
-                $"No se encontró clase pública que implemente IComprobanteDriver en el ensamblado {asm.FullName}");
+                $"No se encontró clase pública que implemente IMotorEcf en el ensamblado {asm.FullName}");
 
-        var inst = (IComprobanteDriver)Activator.CreateInstance(tipoDriver)!;
+        var inst = (IMotorEcf)Activator.CreateInstance(tipoDriver)!;
         return new DriverHandle(version, hash, inst, ctx);
     }
 

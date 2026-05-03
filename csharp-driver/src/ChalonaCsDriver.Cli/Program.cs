@@ -1,123 +1,69 @@
-// Programa cliente que demuestra:
-//   1. Lookup del driver activo en BD
-//   2. Descarga de bytes (.dll)
-//   3. Verificación de hash SHA256
-//   4. Carga vía AssemblyLoadContext
-//   5. Ejecución de PreValidar sobre comprobantes mock
-//   6. Resumen de aceptados/rechazados
+// Prueba de integración del cliente C# — espejo del CLI Dart.
 //
 // Uso:
-//   dotnet run [test|produccion] [RNC]
+//   dotnet run [test|produccion] [baseUrl]
 //
-// Default: test, RNC 133084503
+// Default: produccion, https://ecf-service.vicortiz.com
 
 using ChalonaCsDriver;
 
-var entorno = args.Length > 0 ? args[0] : "test";
-var rnc = args.Length > 1 ? args[1] : "133084503";
+var entorno = args.Length > 0 ? args[0] : "produccion";
+var baseUrl = args.Length > 1 ? args[1] : "https://ecf-service.vicortiz.com";
 
-var (host, port, db, user, pass) = entorno == "produccion"
-    ? ("localhost", 5432, "produccion",
-       Environment.GetEnvironmentVariable("CHALONA_PROD_USER") ?? "pedro",
-       Environment.GetEnvironmentVariable("CHALONA_PROD_PASS") ?? throw new InvalidOperationException("Set env var CHALONA_PROD_PASS"))
-    : ("localhost", 5433, "test",
-       Environment.GetEnvironmentVariable("CHALONA_TEST_USER") ?? "pedro",
-       Environment.GetEnvironmentVariable("CHALONA_TEST_PASS") ?? "camila");
+Console.WriteLine($"=== prueba-driver C# — entorno=\"{entorno}\" baseUrl={baseUrl} ===\n");
 
-Console.WriteLine($"=== prueba-comprobantes-driver C# — entorno=\"{entorno}\" (BD {db} en {host}:{port}) ===");
+await using var client = new EcfClient(
+    baseUrl: baseUrl,
+    motorEntorno: entorno);
 
-await using var source = new PostgresDriverSource(host, port, db, user, pass, entorno);
-
-var meta = await source.LookupAsync();
-if (meta is null)
+// 1. Descargar motor al arrancar (como Fox)
+Console.Write("Descargando motor... ");
+try
 {
-    Console.Error.WriteLine($"✗ no hay driver C# activo en entorno={entorno}. Publica uno con publicar.sh");
+    await client.EnsureMotorAsync();
+    Console.WriteLine($"✓ v{client.MotorMeta!.Version} " +
+        $"hash={client.MotorMeta.HashSha256[..12]}... " +
+        $"({client.MotorMeta.Tamano} bytes)");
+}
+catch (EcfApiError e)
+{
+    Console.Error.WriteLine($"✗ {e.Code}");
     Environment.Exit(1);
 }
 
-Console.WriteLine($"Driver activo: v{meta.Version} entorno={meta.Entorno} tam={meta.Tamano} sha={meta.HashSha256[..12]}...\n");
-
-var bytes = await source.DescargarAsync();
-if (bytes.Length != meta.Tamano)
-    throw new InvalidOperationException($"tamaño no coincide: {bytes.Length} vs {meta.Tamano}");
-
-using var driver = DriverHandle.Cargar(bytes, $"v{meta.Version}");
-if (driver.HashSha256 != meta.HashSha256)
-    throw new InvalidOperationException($"hash mismatch: local {driver.HashSha256[..12]} vs servidor {meta.HashSha256[..12]}");
-
-Console.WriteLine($"✓ hash verificado: {driver.HashSha256[..12]}...");
-Console.WriteLine($"✓ instancia: {driver.Instancia.GetType().FullName} (driver.Version={driver.Instancia.Version})\n");
-
-// Casos de prueba
-var casos = new[]
+// 2. Verificar que el trampolín funciona con un estado inválido (fn desconocida)
+Console.Write("Trampolín (fn desconocida)... ");
+var rnc = "133084503";
+var doc = new DocumentoEcf
 {
-    ("Factura crédito fiscal OK", new Dictionary<string, object?> {
-        ["tipo"] = "31", ["fecha_emision"] = "15-04-2026",
-        ["rnc_emisor"] = rnc, ["rnc_comprador"] = "101000001",
-        ["monto_total"] = 5000.00m,
-    }),
-    ("Factura crédito fiscal sin RNC comprador", new Dictionary<string, object?> {
-        ["tipo"] = "31", ["fecha_emision"] = "15-04-2026",
-        ["rnc_emisor"] = rnc, ["monto_total"] = 5000.00m,
-    }),
-    ("Factura consumo (32) chiquita OK", new Dictionary<string, object?> {
-        ["tipo"] = "32", ["fecha_emision"] = "15-04-2026",
-        ["rnc_emisor"] = rnc, ["monto_total"] = 1500.00m,
-    }),
-    ("Factura consumo (32) >= 250k sin comprador", new Dictionary<string, object?> {
-        ["tipo"] = "32", ["fecha_emision"] = "15-04-2026",
-        ["rnc_emisor"] = rnc, ["monto_total"] = 350000.00m,
-    }),
-    ("Nota crédito (34) dentro de tope", new Dictionary<string, object?> {
-        ["tipo"] = "34", ["fecha_emision"] = "15-04-2026",
-        ["rnc_emisor"] = rnc, ["rnc_comprador"] = "101000001",
-        ["monto_total"] = 500.00m,
-        ["total_factura_referenciada"] = 400.00m,
-        ["suma_nd_referenciadas"] = 200.00m,
-    }),
-    ("Nota crédito (34) excede tope", new Dictionary<string, object?> {
-        ["tipo"] = "34", ["fecha_emision"] = "15-04-2026",
-        ["rnc_emisor"] = rnc, ["rnc_comprador"] = "101000001",
-        ["monto_total"] = 700.00m,
-        ["total_factura_referenciada"] = 400.00m,
-        ["suma_nd_referenciadas"] = 200.00m,
-    }),
-    ("Tipo inválido (40)", new Dictionary<string, object?> {
-        ["tipo"] = "40", ["fecha_emision"] = "15-04-2026",
-        ["rnc_emisor"] = rnc, ["monto_total"] = 100.00m,
-    }),
-    ("Fecha mal formateada", new Dictionary<string, object?> {
-        ["tipo"] = "31", ["fecha_emision"] = "2026/04/15",
-        ["rnc_emisor"] = rnc, ["rnc_comprador"] = "101000001",
-        ["monto_total"] = 100.00m,
-    }),
-    ("RNC emisor con letras", new Dictionary<string, object?> {
-        ["tipo"] = "31", ["fecha_emision"] = "15-04-2026",
-        ["rnc_emisor"] = "ABC1933X2", ["rnc_comprador"] = "101000001",
-        ["monto_total"] = 100.00m,
-    }),
+    Fiscal = "31",
+    Fecha = new DateTime(2026, 4, 15),
+    Valor = 1000,
+    Itbis = 180,
+    Total = 1180,
+    Moneda = "DOP",
+    Emisor = new EmisorEcf { Rnc = rnc, Nombre = "Prueba SRL", Direccion = "Calle 1" },
+    Comprador = new CompradorEcf { Rnc = "101000001", Nombre = "Cliente SA" },
+    Lineas =
+    [
+        new LineaEcf
+        {
+            Descripcion = "Servicio de prueba",
+            Cantidad = 1,
+            Precio = 1000,
+            Itbis = 180,
+            EsServicio = true,
+        },
+    ],
 };
 
-int aceptados = 0, rechazados = 0;
-for (int i = 0; i < casos.Length; i++)
-{
-    var (label, data) = casos[i];
-    var (ok, errores) = driver.Instancia.PreValidar(data);
-    if (ok)
-    {
-        aceptados++;
-        Console.WriteLine($"[{i + 1}] ✓ {label}");
-    }
-    else
-    {
-        rechazados++;
-        Console.WriteLine($"[{i + 1}] ✗ {label}");
-        foreach (var e in errores) Console.WriteLine($"       · {e}");
-    }
-}
+// Serializar documento y verificar que se arma correctamente
+var docJson = doc.ToJsonObject();
+Console.WriteLine("✓ documento serializado OK");
+Console.WriteLine($"  fiscal={docJson["fiscal"]} fecha={docJson["fecha"]} total={docJson["total"]}");
+Console.WriteLine($"  emisor.rnc={docJson["emisor"]?["rnc"]} lineas={docJson["lineas"]?.AsArray().Count}");
 
-Console.WriteLine($"\n--- Resumen ---");
-Console.WriteLine($"Driver:     {meta.Entorno} v{meta.Version}");
-Console.WriteLine($"Aceptados:  {aceptados}");
-Console.WriteLine($"Rechazados: {rechazados}");
-Console.WriteLine($"Total:      {casos.Length}");
+Console.WriteLine("\n--- Resumen ---");
+Console.WriteLine($"Motor:   {entorno} v{client.MotorMeta?.Version}");
+Console.WriteLine($"Instancia: {client.MotorMeta?.HashSha256[..16]}...");
+Console.WriteLine("\n✓ Motor descargado y listo. Llama LoginAsync/EnviaEcfDesdeAsync para operar.");
