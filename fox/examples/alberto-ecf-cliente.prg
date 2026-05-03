@@ -9,12 +9,21 @@
 *   - Variable global mEmpresa filtra todo
 *   - Control format = "<tipo>|<numero>"   ej: "32|12345"
 *
+* Persistencia respuesta DGII:
+*   - Tabla destino: data\chalecf.dbf  (creada por crear-chalecf.prg)
+*   - Free-table (no DBC), nombres truncados a 10 chars:
+*       codigo_seguridad    -> cod_seg
+*       fecha_firma         -> fecha_fir
+*       estado_descripcion  -> estado_des
+*       secuencia_utilizada -> sec_util
+*
 * Uso desde la app Alberto:
 *   loResp = AlbertoEnviarEcf(32, 12345)
 *   loResp = AlbertoSincronizarEstados()
 *-----------------------------------------------------------------------------
 
 #Define ALB_LOCK_PATH  "data\chalonaecf_sync.lck"
+#Define ALB_TBL_SYNC   "data\chalecf"
 
 *=============================================================================
 * ENVIAR
@@ -60,9 +69,16 @@ Function AlbertoEnviarEcf
     Endif
   Endif
 
-  * 5. Persistir respuesta en tablas Alberto (sync_ecf, ventas.ncf, etc.).
+  * 5. Persistir respuesta en data\chalecf.
+  Local lcMsgErr
   If loResp.ok
-    _AlbPersistirRespuesta(tnTipo, tnNumero)
+    _AlbPersistirRespuesta(tnTipo, tnNumero, loResp)
+  Else
+    lcMsgErr = "envio_fallo"
+    If Vartype(loResp) = "O" And Pemstatus(loResp, "mensaje", 5)
+      lcMsgErr = Alltrim(Nvl(loResp.mensaje, "envio_fallo"))
+    Endif
+    _AlbPersistirError(lcCtrl, lcMsgErr, Inlist(tnTipo, 41, 43))
   Endif
 
   Return loResp
@@ -113,7 +129,7 @@ Function AlbertoSincronizarEstados
       Endif
     Endif
 
-    * 4. Leer cursor reescrito y persistir estados en sync_ecf de Alberto.
+    * 4. Leer cursor reescrito y persistir estados en data\chalecf.
     If loResp.ok
       _AlbPersistirEstadosSync()
     Endif
@@ -352,7 +368,7 @@ Endfunc
 
 Function _AlbDetalleVentas
   Lparameters tnNumero, tnTransa
-  Local lcDescr
+  Local lcDescr, lnTasa
   If !Used("detalle")
     Use detalle Again Shared In 0
   Endif
@@ -368,13 +384,31 @@ Function _AlbDetalleVentas
       lcDescr = _AlbStr("producto","nombre")
     Endif
     Select detalle
+    lnTasa = _AlbItbisTasaDeCodigo(_AlbNum("detalle","coditbis"))
     Insert Into curChalDet ;
       (precio, cantidad, descrip, mercs_nombre, mercs_servicio, ;
-       itbis_retenido, isr_retenido) ;
+       itbis_tasa, itbis_retenido, isr_retenido) ;
       Values ( ;
         _AlbNum("detalle","precio"), _AlbNum("detalle","cantidad"), ;
-        lcDescr, lcDescr, 0, 0, 0 )
+        lcDescr, lcDescr, 0, ;
+        lnTasa, 0, 0 )
   Endscan
+Endfunc
+
+* Mapea detalle.coditbis (Alberto) -> tasa de ITBIS para curChalDet.itbis_tasa.
+*   0 -> 0   (exento)
+*   1 -> 16  (reducido)
+*   2 -> 18  (general)
+Function _AlbItbisTasaDeCodigo
+  Lparameters tnCod
+  Do Case
+  Case tnCod = 1
+    Return 16
+  Case tnCod = 2
+    Return 18
+  Otherwise
+    Return 0
+  Endcase
 Endfunc
 
 Function _AlbDetalleNc
@@ -399,34 +433,56 @@ Function _AlbDetalleNc
   If lnM18 > 0
     Insert Into curChalDet ;
       (precio, cantidad, descrip, mercs_nombre, mercs_servicio, ;
-       itbis_retenido, isr_retenido) ;
+       itbis_tasa, itbis_retenido, isr_retenido) ;
       Values ( ;
         lnM18, 1, Alltrim(lcConcepto) + "  CON 18% ITBIS", ;
-        Alltrim(lcConcepto) + "  CON 18% ITBIS", 0, 0, 0 )
+        Alltrim(lcConcepto) + "  CON 18% ITBIS", 0, 18, 0, 0 )
   Endif
   If lnM00 > 0
     Insert Into curChalDet ;
       (precio, cantidad, descrip, mercs_nombre, mercs_servicio, ;
-       itbis_retenido, isr_retenido) ;
+       itbis_tasa, itbis_retenido, isr_retenido) ;
       Values ( ;
         lnM00, 1, Alltrim(lcConcepto) + "  EXENTO", ;
-        Alltrim(lcConcepto) + "  EXENTO", 0, 0, 0 )
+        Alltrim(lcConcepto) + "  EXENTO", 0, 0, 0, 0 )
   Endif
 Endfunc
 
 
 Function _AlbLlenarEmpresa
-  If !Used("empresa")
-    Use empresa Again Shared In 0
+  * Rolfi guarda los datos del emisor en data\general.dbf (no empresa.dbf).
+  * Mapeo: empresa.empresa = general.empresa, direccion = calle+sector+localidad,
+  *        iprecio = general.incluido (.T. -> 1, .F. -> 0).
+  If !Used("general")
+    Use data\general Again Shared In 0
   Endif
-  Select empresa
+  Select general
   Locate For codigo = mEmpresa
   If !Found()
     Return
   Endif
+
+  Local lcDir, lcCalle, lcSector, lcLocal, lnIPrec
+  lcCalle  = _AlbStr("general","calle")
+  lcSector = _AlbStr("general","sector")
+  lcLocal  = _AlbStr("general","localidad")
+  lcDir    = Alltrim(lcCalle)
+  If !Empty(lcSector)
+    lcDir = lcDir + ", " + Alltrim(lcSector)
+  Endif
+  If !Empty(lcLocal)
+    lcDir = lcDir + ", " + Alltrim(lcLocal)
+  Endif
+
+  * iprecio: 1 si los precios incluyen ITBIS, 0 si no. Field "incluido" es L.
+  lnIPrec = 0
+  If Type("general.incluido") = "L" And Nvl(general.incluido, .F.)
+    lnIPrec = 1
+  Endif
+
   Insert Into curChalEmp (rnc, nombre, direccion, iprecio) ;
-    Values (_AlbStr("empresa","rnc"), _AlbStr("empresa","nombre"), ;
-            _AlbStr("empresa","direccion"), _AlbNum("empresa","iprecio"))
+    Values (_AlbStr("general","rnc"), _AlbStr("general","empresa"), ;
+            lcDir, lnIPrec)
 Endfunc
 
 
@@ -482,19 +538,16 @@ Function _AlbLlenarReferencia
 Endfunc
 
 
-* Pendientes: docs Alberto con encf emitido pero estado aun "en proceso".
-* Cliente decide la fuente; aqui ejemplo desde sync_ecf.
+* Pendientes: docs Rolfi con encf emitido pero estado aun "en proceso".
+* Fuente: data\chalecf (tabla destino respuesta DGII).
 Function _AlbLlenarPendientes
-  Local lnTipo
-  If !Used("sync_ecf")
-    Use sync_ecf Again Shared In 0
+  If !Used("chalecf")
+    Use (ALB_TBL_SYNC) Again Shared In 0
   Endif
-  Select sync_ecf
+  Select chalecf
   Scan For Lower(Alltrim(estado)) == "en proceso" And empresa = mEmpresa
-    lnTipo = Val(Left(Alltrim(sync_ecf.control), 2))
     Insert Into curChalonaEncfEnProceso (control, encf, es_gastos) ;
-      Values (Alltrim(sync_ecf.control), Alltrim(sync_ecf.encf), ;
-              Inlist(lnTipo, 41, 43))
+      Values (Alltrim(chalecf.control), Alltrim(chalecf.encf), chalecf.es_gastos)
   Endscan
 Endfunc
 
@@ -503,49 +556,168 @@ Endfunc
 * PERSISTENCIA RESPUESTA
 *=============================================================================
 
-* Lee curChalMae (motor reescribio encf + estado + codigo_seguridad + ...).
-* Persiste en sync_ecf de Alberto. Adaptar a la tabla destino del ERP.
+* Lee respuesta DGII y persiste en data\chalecf con nombres truncados a 10 chars
+* (free-table). Prefiere loResp.data si esta disponible (mas robusto que el cursor
+* curChalMae que algunas versiones del motor cierran despues del envio).
 Function _AlbPersistirRespuesta
-  Lparameters tnTipo, tnNumero
-  Select curChalMae
-  Go Top
-  If !Used("sync_ecf")
-    Use sync_ecf Again Shared In 0
+  Lparameters tnTipo, tnNumero, loResp
+  Local llGastos, lcEncf, lcNum, lcEstado, lcEstDes, lcCod, lcFFir, lcTimb
+  Local lnSecUtil, lcMomento, ltAhora, llTengoCursor, lcCtrl, loD
+  llGastos = Inlist(tnTipo, 41, 43)
+  ltAhora  = Datetime()
+
+  * Defaults vacios.
+  lcEncf    = ""
+  lcEstado  = ""
+  lcEstDes  = ""
+  lcCod     = ""
+  lcFFir    = ""
+  lcTimb    = ""
+  lnSecUtil = 0
+  lcMomento = ""
+
+  * 1) Intentar leer del cursor curChalMae (motor lo reescribe en algunas versiones).
+  llTengoCursor = .F.
+  If Used("curChalMae") And Reccount("curChalMae") >= 1
+    Select curChalMae
+    Go Top
+    lcEncf    = Alltrim(Nvl(curChalMae.encf, ""))
+    lcEstado  = Alltrim(Nvl(curChalMae.estado, ""))
+    lcEstDes  = Alltrim(Nvl(curChalMae.estado_descripcion, ""))
+    lcCod     = Alltrim(Nvl(curChalMae.codigo_seguridad, ""))
+    lcFFir    = Alltrim(Nvl(curChalMae.fecha_firma, ""))
+    lcTimb    = Alltrim(Nvl(curChalMae.timbre, ""))
+    lnSecUtil = Nvl(curChalMae.secuencia_utilizada, 0)
+    lcMomento = Alltrim(Nvl(curChalMae.momento, ""))
+    llTengoCursor = !Empty(lcEncf) Or !Empty(lcEstado)
   Endif
-  Select sync_ecf
-  Locate For Alltrim(control) == Alltrim(curChalMae.control) And empresa = mEmpresa
+
+  * 2) Fallback: si el cursor no esta o vino vacio, leer de loResp.data.
+  If !llTengoCursor And Vartype(loResp) = "O" And Pemstatus(loResp, "data", 5)
+    If Vartype(loResp.data) = "O"
+      loD = loResp.data
+      If Pemstatus(loD, "encf", 5)
+        lcEncf = Alltrim(Transform(Nvl(loD.encf, "")))
+      Endif
+      If Pemstatus(loD, "estado", 5)
+        lcEstado = Alltrim(Transform(Nvl(loD.estado, "")))
+      Endif
+      If Pemstatus(loD, "estado_descripcion", 5)
+        lcEstDes = Alltrim(Transform(Nvl(loD.estado_descripcion, "")))
+      Endif
+      If Pemstatus(loD, "codigo_seguridad", 5)
+        lcCod = Alltrim(Transform(Nvl(loD.codigo_seguridad, "")))
+      Endif
+      If Pemstatus(loD, "fecha_firma", 5)
+        lcFFir = Alltrim(Transform(Nvl(loD.fecha_firma, "")))
+      Endif
+      If Pemstatus(loD, "timbre", 5)
+        lcTimb = Alltrim(Transform(Nvl(loD.timbre, "")))
+      Endif
+      If Pemstatus(loD, "secuencia_utilizada", 5)
+        lnSecUtil = Nvl(loD.secuencia_utilizada, 0)
+      Endif
+      If Pemstatus(loD, "momento", 5)
+        lcMomento = Alltrim(Transform(Nvl(loD.momento, "")))
+      Endif
+    Endif
+  Endif
+
+  * Para gastos el numero es ncf (no encf); para ventas usa encf.
+  lcNum = lcEncf
+
+  If !Used("chalecf")
+    Use (ALB_TBL_SYNC) Again Shared In 0
+  Endif
+
+  * Construir el control desde tnTipo + tnNumero (no depender de curChalMae).
+  lcCtrl = Alltrim(Transform(tnTipo)) + "|" + Alltrim(Transform(tnNumero))
+
+  Select chalecf
+  Locate For Alltrim(control) == lcCtrl And empresa = mEmpresa
   If Found()
     Replace ;
-      encf With Alltrim(curChalMae.encf), ;
-      estado With Alltrim(curChalMae.estado), ;
-      codigo_seguridad With Alltrim(curChalMae.codigo_seguridad), ;
-      fecha_firma With Alltrim(curChalMae.fecha_firma), ;
-      timbre With Alltrim(curChalMae.timbre)
+      es_gastos  With llGastos, ;
+      encf       With lcEncf, ;
+      numero     With lcNum, ;
+      estado     With lcEstado, ;
+      estado_des With lcEstDes, ;
+      cod_seg    With lcCod, ;
+      fecha_fir  With lcFFir, ;
+      timbre     With lcTimb, ;
+      sec_util   With lnSecUtil, ;
+      momento    With lcMomento, ;
+      err_msg    With "", ;
+      intentos   With Nvl(intentos, 0) + 1, ;
+      ult_env    With ltAhora, ;
+      modificado With ltAhora
   Else
-    Insert Into sync_ecf ;
-      (empresa, control, encf, estado, codigo_seguridad, fecha_firma, timbre) ;
-      Values (mEmpresa, Alltrim(curChalMae.control), Alltrim(curChalMae.encf), ;
-              Alltrim(curChalMae.estado), Alltrim(curChalMae.codigo_seguridad), ;
-              Alltrim(curChalMae.fecha_firma), Alltrim(curChalMae.timbre))
+    Insert Into chalecf ;
+      (empresa, control, es_gastos, encf, numero, estado, estado_des, ;
+       cod_seg, fecha_fir, timbre, sec_util, momento, ;
+       intentos, ult_env, creado, modificado) ;
+      Values ( ;
+       mEmpresa, lcCtrl, llGastos, lcEncf, lcNum, ;
+       lcEstado, lcEstDes, lcCod, lcFFir, lcTimb, lnSecUtil, lcMomento, ;
+       1, ltAhora, ltAhora, ltAhora )
+  Endif
+Endfunc
+
+
+* Marca un error de envio (loResp.ok = .F.) en data\chalecf, sin tocar encf/estado.
+Function _AlbPersistirError
+  Lparameters tcCtrl, tcMsg, tlGastos
+  Local ltAhora
+  ltAhora = Datetime()
+  If !Used("chalecf")
+    Use (ALB_TBL_SYNC) Again Shared In 0
+  Endif
+  Select chalecf
+  Locate For Alltrim(control) == Alltrim(tcCtrl) And empresa = mEmpresa
+  If Found()
+    Replace ;
+      err_msg    With Left(Alltrim(tcMsg), 2000), ;
+      intentos   With Nvl(intentos, 0) + 1, ;
+      ult_env    With ltAhora, ;
+      modificado With ltAhora
+  Else
+    Insert Into chalecf ;
+      (empresa, control, es_gastos, err_msg, intentos, ult_env, creado, modificado) ;
+      Values (mEmpresa, Alltrim(tcCtrl), tlGastos, ;
+              Left(Alltrim(tcMsg), 2000), 1, ltAhora, ltAhora, ltAhora)
   Endif
 Endfunc
 
 
 * Recorre curChalonaEncfEnProceso (motor reescribio estado actualizado).
 Function _AlbPersistirEstadosSync
-  Local lcCtrl, lcEstado, lcCod
-  If !Used("sync_ecf")
-    Use sync_ecf Again Shared In 0
+  Local lcCtrl, lcEstado, lcCod, lcEstDes, lcFFir, lcTimb, lcMom, lnSec, ltAhora
+  If !Used("chalecf")
+    Use (ALB_TBL_SYNC) Again Shared In 0
   Endif
   Select curChalonaEncfEnProceso
   Scan
     lcCtrl   = Alltrim(curChalonaEncfEnProceso.control)
-    lcEstado = Alltrim(curChalonaEncfEnProceso.estado)
-    lcCod    = Alltrim(curChalonaEncfEnProceso.codigo_seguridad)
-    Select sync_ecf
+    lcEstado = Alltrim(Nvl(curChalonaEncfEnProceso.estado, ""))
+    lcEstDes = Alltrim(Nvl(curChalonaEncfEnProceso.estado_descripcion, ""))
+    lcCod    = Alltrim(Nvl(curChalonaEncfEnProceso.codigo_seguridad, ""))
+    lcFFir   = Alltrim(Nvl(curChalonaEncfEnProceso.fecha_firma, ""))
+    lcTimb   = Alltrim(Nvl(curChalonaEncfEnProceso.timbre, ""))
+    lcMom    = Alltrim(Nvl(curChalonaEncfEnProceso.momento, ""))
+    lnSec    = Nvl(curChalonaEncfEnProceso.secuencia_utilizada, 0)
+    ltAhora  = Datetime()
+    Select chalecf
     Locate For Alltrim(control) == lcCtrl And empresa = mEmpresa
     If Found()
-      Replace estado With lcEstado, codigo_seguridad With lcCod
+      Replace ;
+        estado     With lcEstado, ;
+        estado_des With lcEstDes, ;
+        cod_seg    With lcCod, ;
+        fecha_fir  With lcFFir, ;
+        timbre     With lcTimb, ;
+        momento    With lcMom, ;
+        sec_util   With lnSec, ;
+        modificado With ltAhora
     Endif
     Select curChalonaEncfEnProceso
   Endscan
@@ -555,11 +727,31 @@ Endfunc
 *=============================================================================
 * HELPERS DE CAMPO (defensivos: campo puede no existir)
 *=============================================================================
+* _AlbNum: lee un campo numerico de la DBF y devuelve N puro.
+* Convierte explicitamente Currency (Y), Integer (I), Float (F), Double (B) a N
+* via "+ 0" porque _ChalonaEcfNzNum del motor solo entiende N — los Currency
+* caen en Otherwise y devuelven 0 (lo cual rompia el detalle con MontoItem=0).
 Function _AlbNum
   Lparameters tcAlias, tcField
-  Local lcRef
+  Local lcRef, luV
   lcRef = tcAlias + "." + tcField
-  Return Iif(Type(lcRef) = "U", 0, _ChalonaEcfNzNum(Evaluate(lcRef)))
+  If Type(lcRef) = "U"
+    Return 0
+  Endif
+  luV = Evaluate(lcRef)
+  If Isnull(luV)
+    Return 0
+  Endif
+  Do Case
+  Case Inlist(Vartype(luV), "N", "Y", "I", "F", "B")
+    Return luV + 0      && coerce Currency/etc a Numeric plano
+  Case Vartype(luV) = "L"
+    Return Iif(luV, 1, 0)
+  Case Vartype(luV) = "C"
+    Return Val(Alltrim(luV))
+  Otherwise
+    Return 0
+  Endcase
 Endfunc
 
 Function _AlbStr
