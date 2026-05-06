@@ -1,14 +1,12 @@
 name: dart_driver_poc
-description: PoC carga dinámica de lógica via dart_eval (patrón loader Fox)
+description: Cliente HTTP para ecf-service (motor estático, sin dart_eval).
 publish_to: none
-version: 0.0.1
+version: 0.1.0
 
 environment:
   sdk: ^3.4.0
 
 dependencies:
-  dart_eval: ^0.8.4
-  crypto: ^3.0.3
   http: ^1.2.0
 
 dev_dependencies:

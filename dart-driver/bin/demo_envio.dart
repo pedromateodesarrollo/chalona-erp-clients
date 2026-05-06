@@ -27,25 +27,21 @@ Future<void> main() async {
   final clave = _env('ECF_PASS', 'victor123');
   final rnc = _env('ECF_RNC_EMISOR', '131996035');
   final portal = _env('ECF_PORTAL', 'testecf');
-  // Motor entorno: 'test' si baseUrl apunta a localhost; 'produccion' si no.
-  final motorEntorno = baseUrl.contains('localhost') ? 'test' : 'produccion';
-
   print('=== demo_envio ===');
   print('  baseUrl       : $baseUrl');
-  print('  motorEntorno  : $motorEntorno');
   print('  usuario       : $usuario');
   print('  RNC emisor    : $rnc');
   print('  portal DGII   : $portal');
   print('');
 
-  final client = EcfClient(baseUrl: baseUrl, motorEntorno: motorEntorno);
+  final client = EcfClient(baseUrl: baseUrl);
 
   try {
     print('-- 1. Login');
     final login = await client.login(usuario, clave);
     print('   usuario.email  : ${login['usuario']?['email']}');
     print('   empresa.nombre : ${login['empresa']?['nombre']}');
-    print('   motor cargado  : ${client.motorMeta}');
+
     print('');
 
     print('-- 2. Construir DocumentoEcf (factura crédito fiscal tipo 31)');

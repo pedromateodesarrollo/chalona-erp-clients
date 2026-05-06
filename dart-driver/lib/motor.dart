@@ -1,0 +1,409 @@
+// Motor v1 — lógica de comunicación con ecf-service embebida estáticamente.
+//
+// Antes era compilado a bytecode .evc y descargado dinámicamente vía dart_eval.
+// Ahora es Dart estático: EcfClient llama procesar() directamente.
+//
+// Shell ↔ Motor protocol:
+//   Input estadoJson:
+//     {
+//       "fnName":   "login" | "enviaEcf" | "consultaEstado" | "descargaXmls",
+//       "args":     {...},
+//       "token":    "Bearer ..." | null,
+//       "step":     0,
+//       "lastResp": {...} | null
+//     }
+//   Output stepJson:
+//     - {"kind":"http", "step":N+1, "endpoint":"...", "data":{...}, "useToken":bool}
+//     - {"kind":"done", "result":{...}, "newToken":"..."?}
+//     - {"kind":"fail", "code":"...", "data":{...}?}
+
+import 'dart:convert';
+
+String procesar(String estadoJson) {
+  final estadoDyn = jsonDecode(estadoJson);
+  if (estadoDyn == null || estadoDyn is! Map) {
+    return _fail('motor.estado_invalido');
+  }
+  final estado = Map<String, Object?>.from(estadoDyn);
+  final fnName = _str(estado, 'fnName');
+  final argsRaw = estado['args'];
+  final args = argsRaw is Map
+      ? Map<String, Object?>.from(argsRaw)
+      : <String, Object?>{};
+  final stepRaw = estado['step'];
+  final step = stepRaw is num ? stepRaw.toInt() : 0;
+  final lastRespRaw = estado['lastResp'];
+  final lastResp =
+      lastRespRaw is Map ? Map<String, Object?>.from(lastRespRaw) : null;
+
+  if (fnName == 'login') return _flowLogin(args, step, lastResp);
+  if (fnName == 'enviaEcf') return _flowEnviaEcf(args, step, lastResp);
+  if (fnName == 'enviaEcfDesdeDoc') {
+    return _flowEnviaEcfDesdeDoc(args, step, lastResp);
+  }
+  if (fnName == 'consultaEstado') {
+    return _flowConsultaEstado(args, step, lastResp);
+  }
+  if (fnName == 'descargaXmls') return _flowDescargaXmls(args, step, lastResp);
+  return _fail('motor.fn_desconocida', {'fnName': fnName});
+}
+
+// ---------------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------------
+String _flowLogin(
+  Map<String, Object?> args,
+  int step,
+  Map<String, Object?>? lastResp,
+) {
+  if (step == 0) {
+    final usuario = _str(args, 'usuario').trim();
+    final clave = _str(args, 'clave');
+    final appRaw = _str(args, 'app').trim();
+    final app = appRaw.isEmpty ? 'ecf' : appRaw;
+    if (usuario.isEmpty) return _fail('motor.login.usuario_requerido');
+    if (clave.isEmpty) return _fail('motor.login.clave_requerida');
+    return _http('sistema_login', {
+      'app': app,
+      'usuario': usuario,
+      'clave': clave,
+    }, useToken: false, nextStep: 1);
+  }
+  final data = _respData(lastResp);
+  final tokenStr = _str(data, 'token');
+  final token = tokenStr.isEmpty ? null : tokenStr;
+  return _done(data, newToken: token);
+}
+
+// ---------------------------------------------------------------------------
+// Envía e-CF (payload DGII ya construido)
+// ---------------------------------------------------------------------------
+String _flowEnviaEcf(
+  Map<String, Object?> args,
+  int step,
+  Map<String, Object?>? lastResp,
+) {
+  if (step == 0) {
+    final rnc = _str(args, 'rnc').trim();
+    final portal = _str(args, 'portal').trim();
+    final json = args['json'];
+    if (rnc.isEmpty) return _fail('motor.envia_ecf.rnc_requerido');
+    if (portal != 'ecf' && portal != 'testecf') {
+      return _fail('motor.envia_ecf.portal_invalido', {'portal': portal});
+    }
+    if (json is! Map) return _fail('motor.envia_ecf.json_requerido');
+    return _http('envia_ecf', {
+      'rnc': rnc,
+      'portal': portal,
+      'json': json,
+    }, useToken: true, nextStep: 1);
+  }
+  return _done(_respData(lastResp));
+}
+
+// ---------------------------------------------------------------------------
+// Envía e-CF desde DocumentoEcf (formato cursores Fox)
+// ---------------------------------------------------------------------------
+String _flowEnviaEcfDesdeDoc(
+  Map<String, Object?> args,
+  int step,
+  Map<String, Object?>? lastResp,
+) {
+  if (step == 0) {
+    final docRaw = args['documento'];
+    final portal = _str(args, 'portal').trim();
+    if (docRaw == null || docRaw is! Map) {
+      return _fail('motor.envia_doc.documento_requerido');
+    }
+    if (portal != 'ecf' && portal != 'testecf') {
+      return _fail('motor.envia_doc.portal_invalido', {'portal': portal});
+    }
+    final doc = Map<String, Object?>.from(docRaw);
+
+    final fiscal = _str(doc, 'fiscal').trim();
+    if (fiscal.isEmpty) return _fail('motor.envia_doc.fiscal_requerido');
+    if (fiscal != '31' && fiscal != '32' && fiscal != '33' && fiscal != '34') {
+      return _fail(
+        'motor.envia_doc.tipo_no_soportado_aun',
+        {'fiscal': fiscal},
+      );
+    }
+
+    final emisorRaw = doc['emisor'];
+    final emisor =
+        emisorRaw is Map ? Map<String, Object?>.from(emisorRaw) : null;
+    if (emisor == null) return _fail('motor.envia_doc.emisor_requerido');
+    final emisorRnc = _str(emisor, 'rnc').trim();
+    if (emisorRnc.isEmpty) return _fail('motor.envia_doc.emisor_rnc_requerido');
+
+    final compradorRaw = doc['comprador'];
+    final comprador =
+        compradorRaw is Map ? Map<String, Object?>.from(compradorRaw) : null;
+    if (fiscal == '31' && comprador == null) {
+      return _fail('motor.envia_doc.comprador_requerido_31');
+    }
+
+    final lineas = (doc['lineas'] as List?) ?? <Object?>[];
+    if (lineas.isEmpty) return _fail('motor.envia_doc.sin_lineas');
+
+    final fechaEmision = _str(doc, 'fecha');
+    final encf = _str(doc, 'encf');
+    final moneda = _str(doc, 'moneda', 'DOP');
+    final tasa = _numFromMap(doc, 'tasa', 1);
+
+    final detallesItems = <Map<String, Object?>>[];
+    var nLinea = 1;
+    for (final lineaRaw in lineas) {
+      if (lineaRaw is Map) {
+        final l = Map<String, Object?>.from(lineaRaw);
+        final cantidad = _numFromMap(l, 'cantidad', 0);
+        final precio = _numFromMap(l, 'precio', 0);
+        final monto = cantidad * precio;
+        final esServicio = _numFromMap(l, 'mercs_servicio', 1).toInt() == 2;
+        final itbisLinea = _numFromMap(l, 'itbis', 0);
+        final indFact = itbisLinea > 0 ? '1' : '4';
+        detallesItems.add({
+          'NumeroLinea': nLinea.toString(),
+          'IndicadorFacturacion': indFact,
+          'NombreItem': _str(l, 'descrip'),
+          'IndicadorBienoServicio': esServicio ? '2' : '1',
+          'CantidadItem': _fmt4(cantidad),
+          'PrecioUnitarioItem': _fmt2(precio),
+          'MontoItem': _fmt2(monto),
+        });
+        nLinea++;
+      }
+    }
+
+    var fechaVenceSec = _str(doc, 'vence_fiscal');
+    if (fechaVenceSec.isEmpty) fechaVenceSec = '31-12-2099';
+
+    final idDoc = <String, Object?>{
+      'TipoeCF': fiscal,
+      'eNCF': encf,
+      'FechaVencimientoSecuencia': fechaVenceSec,
+    };
+    if (fiscal == '31' || fiscal == '32' || fiscal == '33' || fiscal == '34') {
+      idDoc['IndicadorMontoGravado'] = '0';
+    }
+    if (fiscal == '31') {
+      idDoc['TipoIngresos'] = '01';
+      idDoc['TipoPago'] = '1';
+    }
+
+    final emisorMap = <String, Object?>{
+      'RNCEmisor': emisorRnc,
+      'RazonSocialEmisor': _str(emisor, 'nombre'),
+    };
+    final emisorDir = _str(emisor, 'direccion');
+    if (emisorDir.isNotEmpty) emisorMap['DireccionEmisor'] = emisorDir;
+    emisorMap['FechaEmision'] = fechaEmision;
+
+    final encabezado = <String, Object?>{
+      'Version': '1.0',
+      'IdDoc': idDoc,
+      'Emisor': emisorMap,
+    };
+
+    if (comprador != null) {
+      final compMap = <String, Object?>{};
+      final compRnc = _str(comprador, 'rnc');
+      if (compRnc.isNotEmpty) compMap['RNCComprador'] = compRnc;
+      compMap['RazonSocialComprador'] = _str(comprador, 'nombre');
+      encabezado['Comprador'] = compMap;
+    }
+
+    final totalDoc = _numFromMap(doc, 'total', 0);
+    final itbisDoc = _numFromMap(doc, 'itbis', 0);
+    final valorDoc = _numFromMap(doc, 'valor', 0);
+    final montoGravado = valorDoc > 0 ? valorDoc : (totalDoc - itbisDoc);
+    encabezado['Totales'] = <String, Object?>{
+      'MontoGravadoTotal': _fmt2(montoGravado),
+      'MontoGravadoI1': _fmt2(montoGravado),
+      'ITBIS1': '18',
+      'TotalITBIS': _fmt2(itbisDoc),
+      'TotalITBIS1': _fmt2(itbisDoc),
+      'MontoTotal': _fmt2(totalDoc),
+    };
+
+    if (moneda != 'DOP') {
+      encabezado['OtraMoneda'] = <String, Object?>{
+        'TipoMoneda': moneda,
+        'TipoCambio': _fmt4(tasa),
+      };
+    }
+
+    final payload = <String, Object?>{
+      'Encabezado': encabezado,
+      'DetallesItems': detallesItems,
+    };
+
+    return _http('envia_ecf', {
+      'rnc': emisorRnc,
+      'portal': portal,
+      'json': payload,
+    }, useToken: true, nextStep: 1);
+  }
+
+  final dataApi = _respData(lastResp);
+  return _done({
+    'estado': dataApi['estado'],
+    'estado_descripcion': dataApi['estado_descripcion'],
+    'codigo_seguridad': dataApi['codigo_seguridad'],
+    'fecha_firma': dataApi['fecha_firma'],
+    'timbre': dataApi['timbre'],
+    'secuencia_utilizada': dataApi['secuencia_utilizada'],
+    'encf': dataApi['numero'],
+    'id': dataApi['id'],
+    'track_id': dataApi['track_id'],
+    'tipo': dataApi['tipo'],
+    'total': dataApi['total'],
+    'fecha': dataApi['fecha'],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Consulta estado
+// ---------------------------------------------------------------------------
+String _flowConsultaEstado(
+  Map<String, Object?> args,
+  int step,
+  Map<String, Object?>? lastResp,
+) {
+  if (step == 0) {
+    final lista = args['comprobantes'];
+    if (lista is! List) {
+      return _fail('motor.consulta_estado.comprobantes_requeridos');
+    }
+    if (lista.length > 100) {
+      return _fail(
+        'motor.consulta_estado.maximo_100',
+        {'recibidos': lista.length},
+      );
+    }
+    return _http('consulta_estado', {
+      'comprobantes': lista,
+    }, useToken: true, nextStep: 1);
+  }
+  return _done(_respData(lastResp));
+}
+
+// ---------------------------------------------------------------------------
+// Descarga XMLs
+// ---------------------------------------------------------------------------
+String _flowDescargaXmls(
+  Map<String, Object?> args,
+  int step,
+  Map<String, Object?>? lastResp,
+) {
+  if (step == 0) {
+    final fechaDesde = _str(args, 'fecha_desde').trim();
+    final fechaHasta = _str(args, 'fecha_hasta').trim();
+    if (!_isFechaYyyyMmDd(fechaDesde)) {
+      return _fail(
+        'motor.descarga_xmls.fecha_desde_invalida',
+        {'valor': fechaDesde},
+      );
+    }
+    if (!_isFechaYyyyMmDd(fechaHasta)) {
+      return _fail(
+        'motor.descarga_xmls.fecha_hasta_invalida',
+        {'valor': fechaHasta},
+      );
+    }
+    final tipos = args['tipos'];
+    final data = <String, Object?>{
+      'fecha_desde': fechaDesde,
+      'fecha_hasta': fechaHasta,
+    };
+    if (tipos is List && tipos.isNotEmpty) data['tipos'] = tipos;
+    return _http('ecf_documentos_list', data, useToken: true, nextStep: 1);
+  }
+  return _done(_respData(lastResp));
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+Map<String, Object?> _respData(Map<String, Object?>? resp) {
+  if (resp == null) return <String, Object?>{};
+  final d = resp['data'];
+  if (d is Map) return Map<String, Object?>.from(d);
+  return <String, Object?>{};
+}
+
+String _http(
+  String endpoint,
+  Map<String, Object?> data, {
+  required bool useToken,
+  required int nextStep,
+}) => jsonEncode({
+  'kind': 'http',
+  'step': nextStep,
+  'endpoint': endpoint,
+  'data': data,
+  'useToken': useToken,
+});
+
+String _done(Map<String, Object?> result, {String? newToken}) {
+  final out = <String, Object?>{'kind': 'done', 'result': result};
+  if (newToken != null && newToken.isNotEmpty) out['newToken'] = newToken;
+  return jsonEncode(out);
+}
+
+String _fail(String code, [Map<String, Object?>? data]) => jsonEncode({
+  'kind': 'fail',
+  'code': code,
+  'data': data ?? <String, Object?>{},
+});
+
+String _str(Map<String, Object?> m, String key, [String def = '']) {
+  final v = m[key];
+  if (v == null) return def;
+  if (v is String) return v;
+  return v.toString();
+}
+
+double _numFromMap(Map<String, Object?> m, String key, double def) {
+  final v = m[key];
+  if (v == null) return def;
+  if (v is num) return v.toDouble();
+  return double.tryParse(v.toString()) ?? def;
+}
+
+String _fmt2(double v) {
+  final scaled = v * 100;
+  final rounded = (scaled >= 0 ? scaled + 0.5 : scaled - 0.5).toInt();
+  final neg = rounded < 0;
+  final abs = neg ? -rounded : rounded;
+  final entero = abs ~/ 100;
+  final cent = abs % 100;
+  return (neg ? '-' : '') + '$entero.${cent < 10 ? '0$cent' : '$cent'}';
+}
+
+String _fmt4(double v) {
+  final scaled = v * 10000;
+  final rounded = (scaled >= 0 ? scaled + 0.5 : scaled - 0.5).toInt();
+  final neg = rounded < 0;
+  final abs = neg ? -rounded : rounded;
+  final entero = abs ~/ 10000;
+  final dec = abs % 10000;
+  var decStr = '$dec';
+  while (decStr.length < 4) {
+    decStr = '0$decStr';
+  }
+  return (neg ? '-' : '') + '$entero.$decStr';
+}
+
+bool _isFechaYyyyMmDd(String s) {
+  if (s.length != 10) return false;
+  if (s[4] != '-' || s[7] != '-') return false;
+  final y = int.tryParse(s.substring(0, 4));
+  final m = int.tryParse(s.substring(5, 7));
+  final d = int.tryParse(s.substring(8, 10));
+  if (y == null || m == null || d == null) return false;
+  if (y < 2020 || y > 2100) return false;
+  if (m < 1 || m > 12) return false;
+  if (d < 1 || d > 31) return false;
+  return true;
+}
