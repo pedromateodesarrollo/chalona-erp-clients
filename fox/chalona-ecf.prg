@@ -269,8 +269,9 @@ Function ChalonaEcfBuildDocJsonFox
   Local lcSubDesc, lcFLP, lnTipoPago, lnItbis1
   Local loEx
   Local lcOut, llNull, llCorrigeTexto, lnCodMod, llOmitirRef
-  Local lnIprecio, lnIndicadorMontoGravado
+  Local lnIprecio, lnIndicadorMontoGravado, lnFactorIprecio
   Local lnTipoEcf, lnBaseGrav, lnIndFact, lnIndFactLin, lnDiasNcRef, lcIndicadorNotaCredito, lnTolerancia, lnItbisEsperado, llDetTieneItbis, lnItbisLineaVal
+  Local lnPropina, lnPropinaOM
   Local lnSumGravadoI1, lnSumExento, lnSumItbisI1, lnSumGravadoI3, lnSumTotalDet, lnItbisLin
   Local lnSumGravadoI1OM, lnSumExentoOM, lnSumItbisI1OM, lnSumGravadoI3OM
   Local lnGravI1Final, lnItbisI1Final, lnTotalFinal
@@ -418,6 +419,19 @@ Function ChalonaEcfBuildDocJsonFox
   If Type("isr") != "U"
     lnIsrOM = Round(_ChalonaEcfNzNum(isr), 2)
     lnIsr = Round(lnIsrOM * lnTasaFactor, 2)
+  Endif
+  lnPropina = 0
+  lnPropinaOM = 0
+  If Type("propina") != "U"
+    lnPropinaOM = Round(_ChalonaEcfNzNum(propina), 2)
+    lnPropina = Round(lnPropinaOM * lnTasaFactor, 2)
+  Endif
+  * Convencion: cuando existe campo propina separado, imtr.total NO la incluye.
+  * Sumar al lnTotal para que MontoTotal = base + itbis + propina (DGII espera
+  * MontoTotal = MontoGravadoTotal + TotalITBIS + MontoImpuestoAdicional + ...).
+  If lnPropina > 0
+    lnTotal = Round(lnTotal + lnPropina, 2)
+    lnTotalOM = Round(lnTotalOM + lnPropinaOM, 2)
   Endif
   lcMaeRnc = Alltrim(Transform(Nvl(rnc, "")))
   lcMaeNombre = Alltrim(Transform(Nvl(nombre, "")))
@@ -613,7 +627,7 @@ Function ChalonaEcfBuildDocJsonFox
   If Used("curChalDet") And Reccount("curChalDet") > 0
     Select curChalDet
     Scan
-      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor, 6)
+      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / Iif(lnIprecio=1 And lnItbis#0, 1.18, 1), 6)
       lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
       lnTotalBruto = lnTotalBruto + Round(lnP * lnC, 2)
     Endscan
@@ -625,6 +639,7 @@ Function ChalonaEcfBuildDocJsonFox
   Else
     lnItbis1 = 18
   Endif
+  lnFactorIprecio = Iif(lnIprecio = 1 And lnItbis1 > 0, 1 + lnItbis1 / 100, 1)
   lnTipoEcf = Val(lcTipoeCF)
   lnBaseGrav = lnValor - lnDescMae
   Do Case
@@ -660,12 +675,10 @@ Function ChalonaEcfBuildDocJsonFox
     lcFLP = "null"
   Endif
 
-      * IndicadorMontoGravado:
-      * 0=detalle sin ITBIS incluido, 1=detalle con ITBIS incluido.
+      * IndicadorMontoGravado: siempre 0 (precios en detalle son base sin ITBIS).
+      * Cuando iprecio=1 los precios del ERP vienen con ITBIS; se dividen por lnFactorIprecio
+      * antes de usarlos, así el detalle queda en base y IndicadorMontoGravado se mantiene en 0.
       lnIndicadorMontoGravado = 0
-      If lnItbis # 0 And lnIprecio = 1
-        lnIndicadorMontoGravado = 1
-      Endif
 
   * Si precio incluye ITBIS (IndicadorMontoGravado=1), el validador del API compara MontoGravadoI1 con
   * suma(MontoItem de lÃ­neas I1) / (1+ITBIS1/100). Los totales del maestro (valor-itbis) suelen ser base sin ITBIS
@@ -714,7 +727,7 @@ Function ChalonaEcfBuildDocJsonFox
   If !llCorrigeTexto And Used("curChalDet") And Reccount("curChalDet") > 0
     Select curChalDet
     Scan
-      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor, 6)
+      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / lnFactorIprecio, 6)
       lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
       lnBruto = Round(lnP * lnC, 2)
       lnDescLin = 0
@@ -754,7 +767,7 @@ Function ChalonaEcfBuildDocJsonFox
         lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
       Endcase
       If llMultiMoneda
-        lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnC, 2)
+        lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) / lnFactorIprecio * lnC, 2)
         lnDescLinOMloc = Iif(lnDescMaeOM = 0 Or lnTotalBruto = 0, 0, Round(lnDescMaeOM * lnBruto / lnTotalBruto, 2))
         lnMontoItemOMloc = Round(lnBrutoOM - lnDescLinOMloc, 2)
         lnItbisLinOM = Round(lnMontoItemOMloc * lnItbis1 / 100, 2)
@@ -791,7 +804,7 @@ Function ChalonaEcfBuildDocJsonFox
       llNull = .T.
       Exit
     Endif
-    lnDiasNcRef = Ttod(ldFecEmi) - Ttod(ldRefFec)
+    lnDiasNcRef = Iif(Vartype(ldFecEmi)="T", Ttod(ldFecEmi), ldFecEmi) - Iif(Vartype(ldRefFec)="T", Ttod(ldRefFec), ldRefFec)
     lcIndicadorNotaCredito = Iif(lnDiasNcRef > 30, '"IndicadorNotaCredito":1,', '"IndicadorNotaCredito":0,')
   Endif
 
@@ -904,12 +917,12 @@ Function ChalonaEcfBuildDocJsonFox
       * para MontoGravadoI1 y derivar TotalITBIS1 = base con ITBIS - base sin ITBIS.
       lnGravI1Final = lnSumGravadoI1
       lnItbisI1Final = lnSumItbisI1
-      lnTotalFinal = Round(lnSumGravadoI1 + lnSumExento + lnSumItbisI1, 2)
+      lnTotalFinal = Round(lnSumGravadoI1 + lnSumExento + lnSumItbisI1 + lnPropina, 2)
       If lnIndicadorMontoGravado = 1 And lnItbis1 > 0 And lnSumGravadoI1 > 0
         lnFactorItbis = 1 + (lnItbis1 / 100)
         lnGravI1Final = Round(lnSumGravadoI1 / lnFactorItbis, 2)
         lnItbisI1Final = Round(lnSumGravadoI1 - lnGravI1Final, 2)
-        lnTotalFinal = Round(lnSumGravadoI1 + lnSumExento, 2)
+        lnTotalFinal = Round(lnSumGravadoI1 + lnSumExento + lnPropina, 2)
       Endif
       lcTot = "{" + ;
         '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnGravI1Final, 2) + "," + ;
@@ -929,6 +942,14 @@ Function ChalonaEcfBuildDocJsonFox
         '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
     Endif
   Endcase
+  Endif
+
+  * Propina legal (codigo 001): si imtr.propina existe y > 0, inyectar MontoImpuestoAdicional antes de MontoTotal.
+  If lnPropina > 0 And !llCorrigeTexto
+    lnPos = At('"MontoTotal":', lcTot)
+    If lnPos > 0
+      lcTot = Left(lcTot, lnPos - 1) + '"MontoImpuestoAdicional":' + _ChalonaEcfJsonNum(lnPropina, 2) + "," + Substr(lcTot, lnPos)
+    Endif
   Endif
 
   * TipoeCF 41: totales de retenci�n solo si >0 (DGII 11160 si TotalITBISRetenido=0 informado junto a ISR).
@@ -1065,7 +1086,7 @@ Function ChalonaEcfBuildDocJsonFox
     If Used("curChalDet") And Reccount("curChalDet") > 0
       Select curChalDet
       Scan
-        lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor, 6)
+        lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / lnFactorIprecio, 6)
         lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
         lnBruto = Round(lnP * lnC, 2)
         lnDescLin = 0
@@ -1882,6 +1903,7 @@ Define Class ChalonaEcf As Custom
        dgii_codmod         N(2), ;
        itbisr              N(18,2), ;
        isr                 N(18,2), ;
+       propina             N(18,2), ;
        diascr              N(5,0), ;
        comentario          C(200), ;
        referencia          C(40), ;
@@ -2057,9 +2079,13 @@ Define Class ChalonaEcf As Custom
         lcBox = "Control: " + Alltrim(tcControl) + Chr(13) + Chr(10) + lcBox
       Endif
       Messagebox(lcBox, 16, "Chalona ECF - Error de envio")
-      If This.MostrarFormularioError
-        ChalonaMostrarErrorEnvioEcf(loResp, tcControl)
-      Endif
+    Endif
+    If This.MostrarFormularioError ;
+        And Vartype(loResp) = "O" ;
+        And !loResp.ok ;
+        And !llVersionDesact ;
+        And !_ChalonaEcfUiSilenciada()
+      ChalonaMostrarErrorEnvioEcf(loResp, tcControl)
     Endif
 
     Return loResp
@@ -2359,7 +2385,7 @@ Define Class ChalonaEcf As Custom
     Go Top
     Local lcFiscal, lcEncf, lcNcf, lcCtrlCol, ldFecha, lnValor, lnDesc, lnItbis
     Local lnTotal, lnTasa, lcMoneda, lcRnc, lcNombre, lcEntidad, lcOcontrol
-    Local ldFechaVenc, lnCodMod, lnItbisr, lnIsr, lnDiascr
+    Local ldFechaVenc, lnCodMod, lnItbisr, lnIsr, lnDiascr, lnPropina
     Local lcComentario, lcReferencia, lcDoc, lcNumero
     lcFiscal     = Iif(Type("fiscal") # "U", Alltrim(Transform(Nvl(fiscal, ""))), "")
     lcEncf       = Iif(Type("encf") # "U", Alltrim(Transform(Nvl(encf, ""))), "")
@@ -2383,6 +2409,7 @@ Define Class ChalonaEcf As Custom
     lnCodMod     = Iif(Type("dgii_codmod") # "U", _ChalonaEcfNzNum(dgii_codmod), 0)
     lnItbisr     = Iif(Type("itbisr") # "U", _ChalonaEcfNzNum(itbisr), Iif(Type("itbir") # "U", _ChalonaEcfNzNum(itbir), 0))
     lnIsr        = Iif(Type("isr") # "U", _ChalonaEcfNzNum(isr), 0)
+    lnPropina    = Iif(Type("propina") # "U", _ChalonaEcfNzNum(propina), 0)
     lnDiascr     = Iif(Type("diascr") # "U", _ChalonaEcfNzNum(diascr), 0)
     lcComentario = Iif(Type("comentario") # "U", Alltrim(Transform(Nvl(comentario, ""))), "")
     lcReferencia = Iif(Type("referencia") # "U", Alltrim(Transform(Nvl(referencia, ""))), "")
@@ -2392,13 +2419,13 @@ Define Class ChalonaEcf As Custom
     Insert Into curChalMae ;
       (fiscal, encf, ncf, control, fecha, valor, descuento, itbis, total, ;
        tasa, moneda, rnc, nombre, entidad, ocontrol, fechavencencf, dgii_codmod, ;
-       itbisr, isr, diascr, comentario, referencia, doc, numero) ;
+       itbisr, isr, propina, diascr, comentario, referencia, doc, numero) ;
       Values ( ;
        Left(lcFiscal, 2), Left(lcEncf, 20), Left(lcNcf, 20), Left(lcCtrlCol, 40), ;
        ldFecha, lnValor, lnDesc, lnItbis, lnTotal, ;
        lnTasa, Left(lcMoneda, 10), Left(lcRnc, 20), Left(lcNombre, 150), ;
        Left(lcEntidad, 20), Left(lcOcontrol, 40), ldFechaVenc, lnCodMod, ;
-       lnItbisr, lnIsr, lnDiascr, ;
+       lnItbisr, lnIsr, lnPropina, lnDiascr, ;
        Left(lcComentario, 200), Left(lcReferencia, 40), Left(lcDoc, 40), Left(lcNumero, 40))
 
     ChalonaEcfUseInIfUsed(lcRaw)
