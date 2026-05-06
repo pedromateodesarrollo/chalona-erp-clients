@@ -1,14 +1,12 @@
-// demo_certificacion.dart — demostración standalone del driver Dart ECF.
+// demo_envio.dart — demostración standalone del driver Dart ECF.
 //
-// Envía 10 comprobantes de certificación DGII al portal testecf usando el
-// driver HTTP (EcfClient). No requiere package:api ni acceso a BD.
+// Envía 10 comprobantes (tipos 31-32-33-34-41-43-44-45-46-47) al portal
+// testecf usando EcfClient. eNCF generado por servidor (portal testecf).
+// No requiere package:api ni acceso a BD.
 //
 // Uso:
 //   cd ecf/clients/dart-driver
-//   dart run bin/demo_certificacion.dart [secuenciaInicio]
-//
-// secuenciaInicio: entero ≥ 1 (default: 1). Todos los eNCF del lote se
-// numeran desde ese valor. Ejemplo: dart run bin/demo_certificacion.dart 500
+//   dart run bin/demo_envio.dart
 //
 // Emisor: Vicortiz Softwares srl (RNC 131086268).
 // Portal: testecf (pruebas DGII — no afecta datos reales).
