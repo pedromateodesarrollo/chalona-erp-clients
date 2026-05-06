@@ -1,15 +1,15 @@
 ---
 name: driver-cliente
-description: Guía interactiva para integrar un ERP con el cliente Chalona ECF. Úsala cuando el usuario quiera (a) integrar Chalona ECF con su ERP en un lenguaje existente (Fox, Dart, C#, TypeScript, Python) o nuevo, (b) entender cómo funciona el motor con auto-actualización (hot-reload), o (c) recibir ayuda para mapear los datos de su ERP al modelo `DocumentoEcf` y escribir la respuesta de DGII de vuelta a sus tablas. Triggers típicos: "quiero integrar chalona con mi ERP", "cómo hago un cliente nuevo", "cómo funciona el motor", "ayúdame a integrar mi sistema con chalona", "tengo SQL Server / MySQL / DBF / Mongo, cómo conecto".
+description: Guía interactiva para integrar un ERP con el cliente Chalona ECF. Úsala cuando el usuario quiera (a) integrar Chalona ECF con su ERP en un lenguaje existente (Fox, Dart, C#, TypeScript, Python) o nuevo, (b) entender cómo funciona el motor (estático en Dart/C#/TS/Python, dinámico en Fox), o (c) recibir ayuda para mapear los datos de su ERP al modelo `DocumentoEcf` y escribir la respuesta de DGII de vuelta a sus tablas. Triggers típicos: "quiero integrar chalona con mi ERP", "cómo hago un cliente nuevo", "cómo funciona el motor", "ayúdame a integrar mi sistema con chalona", "tengo SQL Server / MySQL / DBF / Mongo, cómo conecto".
 ---
 
 # /driver-cliente — Guía interactiva de integración ECF
 
-Esta skill ayuda a un integrador (o al asistente que trabaja con él) a integrar **su ERP** con el cliente Chalona ECF. El cliente es un **shell delgado** que descarga dinámicamente un **motor** desde el server; el motor controla toda la lógica de comunicación con la DGII. El integrador solo arma `DocumentoEcf` con datos de su ERP y los pasa al cliente — no implementa lógica de DGII.
+Esta skill ayuda a un integrador (o al asistente que trabaja con él) a integrar **su ERP** con el cliente Chalona ECF. El cliente es un **shell delgado** que llama a un **motor** embebido; el motor controla toda la lógica de comunicación con la DGII. El integrador solo arma `DocumentoEcf` con datos de su ERP y los pasa al cliente — no implementa lógica de DGII.
 
 Cuando el usuario invoque esta skill, aplicar las tres fases en orden:
 
-1. **Explicar la arquitectura** (corto, una vez) — qué es el cliente, qué es el motor, hot-reload.
+1. **Explicar la arquitectura** (corto, una vez) — qué es el cliente, qué es el motor, diferencia Fox vs otros.
 2. **Levantar requisitos** — preguntar progresivamente sobre el ERP del integrador.
 3. **Generar el código de integración** — adapter en el lenguaje del integrador que toma datos de su ERP y construye `DocumentoEcf`.
 
@@ -26,11 +26,11 @@ Presentar este resumen exacto (el integrador puede no conocer el sistema):
   - Hace HTTP contra `https://ecf-service.vicortiz.com`.
   - Métodos públicos: `login`, `enviaEcfDesde(documento, portal)`, `consultaEstado(...)`, `descargaXmls(...)`.
   - Es delgado: NO contiene reglas de DGII; solo HTTP + trampolín al motor.
-- **Motor** (lo escribe Chalona, vive en BD del server, hot-reload):
-  - Bytecode/source que el cliente shell descarga al primer uso.
+- **Motor** (lo escribe Chalona):
   - Decide qué request HTTP hacer, arma payload DGII, valida, parsea respuesta.
-  - Versiones por entorno (`test` / `produccion`); cliente envía `<lang>_driver_version` en cada request y server rechaza si está desactualizada → cliente baja la nueva automáticamente.
-  - Bug fix o cambio DGII = nueva versión del motor; clientes existentes la heredan sin recompilar.
+  - **Fox**: motor dinámico — se descarga desde server-ecf vía HTTP, hot-swap sin reiniciar.
+  - **Dart / C# / TypeScript / Python**: motor estático — embebido en la librería (`motor.dart`, `Motor.cs`, `motor.ts`, `motor.py`). Para actualizar hay que distribuir nueva versión del cliente.
+  - Bug fix o cambio DGII = nueva versión del cliente (Dart/TS/Python/C#) o nueva versión del motor en servidor (Fox).
 
 ### Lo que hace el integrador
 
@@ -53,27 +53,21 @@ await client.enviaEcfDesde(doc, portal: 'testecf');
 
 Después del envío, el integrador toma los campos de resultado del documento (`encf`, `estado`, `codigoSeguridad`, `timbre`, `fechaFirma`) y los persiste a sus propias tablas como guste. El cliente shell NO escribe en la BD del integrador — devuelve datos, el integrador decide dónde guardarlos.
 
-### Hot-reload del motor
+### Actualización del motor
 
-El motor vive en Postgres (tabla `data.<lang>_cliente_driver`). El cliente shell:
+**Fox (motor dinámico):** el motor vive en Postgres (`data.fox_cliente_script`). El shell Fox lo descarga al primer uso vía HTTP (`POST /fox_cliente_script`). Si el server detecta versión desactualizada, el shell baja la nueva automáticamente y reintenta. El integrador no baja motor manualmente.
 
-1. Al primer uso (lazy): `lookupMotor(entorno)` → versión activa + sha256.
-2. `descargarMotor(entorno)` → bytes.
-3. Verifica sha256 y carga en runtime sandbox del lenguaje.
-4. En cada request HTTP envía `<lang>_driver_version` y `<lang>_driver_entorno`.
-5. Si server responde `<lang>_cliente_driver.version_desactualizada` → shell descarga la nueva versión y reintenta.
-
-El integrador **no** baja motor manualmente. Lo hace el shell.
+**Dart / C# / TypeScript / Python (motor estático):** no hay descarga. El motor está embebido en la librería. No se necesita Postgres ni credenciales de BD. Para actualizar el motor hay que distribuir una nueva versión de la librería al integrador.
 
 ### Lenguajes ya soportados
 
-| Lenguaje  | Runtime motor                                            | Carpeta del repo            |
-|-----------|----------------------------------------------------------|-----------------------------|
-| Fox (VFP) | `.prg` temporal + `SET PROCEDURE`                        | `chalona-ecf/fox/`          |
-| Dart      | `dart_eval` interpreta `.evc`                            | `chalona-ecf/dart-driver/`  |
-| C# / .NET | `AssemblyLoadContext.LoadFromStream` (`.dll` Roslyn)     | `chalona-ecf/csharp/`       |
-| TypeScript| `node:vm` sandbox (JS source)                            | `chalona-ecf/typescript-driver/` |
-| Python    | `exec()` en namespace aislado (`.py` source)             | `chalona-ecf/python-driver/`|
+| Lenguaje  | Motor       | Demo de vida                     | Carpeta del repo            |
+|-----------|-------------|----------------------------------|-----------------------------|
+| Fox (VFP) | Dinámico    | `prueba_comprobantes_driver.prg` | `chalona-ecf/fox/`          |
+| Dart      | Estático    | `bin/demo_envio.dart` (10/10 ✓) | `chalona-ecf/dart-driver/`  |
+| C# / .NET | Estático    | `ChalonaCsDriver.Cli/`          | `chalona-ecf/csharp-driver/`|
+| TypeScript| Estático    | `bin/demo_envio.ts`             | `chalona-ecf/typescript-driver/` |
+| Python    | Estático    | `bin/demo_envio.py` (10/10 ✓)  | `chalona-ecf/python-driver/`|
 
 Repo público: `github.com/pedromateodesarrollo/chalona-erp-clients`.
 

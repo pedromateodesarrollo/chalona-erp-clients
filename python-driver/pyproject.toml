@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chalona-driver"
 version = "0.1.0"
-description = "Cliente Python con hot-reload de driver e-CF (espejo de dart-driver y csharp-driver)"
+description = "Cliente Python para el API e-CF Chalona (motor estático + shell HTTP)"
 readme = "README.md"
 requires-python = ">=3.9"
 

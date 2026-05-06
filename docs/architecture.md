@@ -34,21 +34,20 @@ POST /endpoint  doc + ver=9        →
 - **Auto-recuperación**: si un swap falla a mitad, el siguiente request lo
   cura. Sin estado huérfano.
 
-## Transporte: dos formas
+## Transporte: dos modelos
 
-Las versiones del motor viven en Postgres, pero los clientes las consumen de
-dos maneras distintas según el lenguaje.
-
-| Cliente | Cómo accede al motor | Endpoint |
+| Cliente | Motor | Transporte |
 |---|---|---|
-| Fox (VFP) | HTTP a server-ecf (Dart) que consulta Postgres | `POST /fox_cliente_script` |
-| Dart | Postgres directo via `package:postgres` | `data.dart_cliente_driver` |
-| C# / .NET | Postgres directo via `Npgsql` | `data.csharp_cliente_driver` |
-| TypeScript | Postgres directo via `pg` | `data.typescript_cliente_driver` |
-| Python | Postgres directo via `psycopg` | `data.python_cliente_driver` |
+| Fox (VFP) | Dinámico — descarga `.prg` vía HTTP a server-ecf | `POST /fox_cliente_script` |
+| Dart | Estático — embebido en `motor.dart` | HTTPS a `ecf-service.vicortiz.com` |
+| C# / .NET | Estático — embebido en `Motor.cs` | HTTPS a `ecf-service.vicortiz.com` |
+| TypeScript | Estático — embebido en `motor.ts` | HTTPS a `ecf-service.vicortiz.com` |
+| Python | Estático — embebido en `motor.py` | HTTPS a `ecf-service.vicortiz.com` |
 
-VFP no tiene driver de Postgres ergonómico, por eso Fox pasa por HTTP. Los
-otros 4 lenguajes hablan SQL directo y evitan el salto.
+Fox mantiene el motor dinámico porque VFP no tiene driver de Postgres y
+el hot-swap de procedimientos es nativo del runtime. Los otros cuatro
+lenguajes usan motor estático: toda la lógica de comunicación vive en el
+cliente y no se descarga desde ningún servidor.
 
 ## Almacenamiento
 
@@ -85,24 +84,21 @@ procedimientos vivo sin reiniciar. El loader baja el .prg, lo compila a .fxp
 con un nombre único (timestamp), y emite el `SET PROCEDURE`. Las llamadas
 siguientes resuelven contra el código nuevo.
 
-### Dart
+### Dart / C# / TypeScript / Python
 
-`dart_eval` permite instanciar un `Runtime` nuevo desde bytes. El cliente
-descarta el runtime viejo (queda elegible para GC) y empieza a llamar el nuevo.
-Si hay requests en vuelo, el código actual del PoC los deja terminar antes de
-soltar la referencia (ver [hot-swap-drain.md](hot-swap-drain.md)).
+Motor estático — no hay descarga ni swap. La lógica de comunicación vive
+embebida en el cliente (`motor.dart`, `Motor.cs`, `motor.ts`, `motor.py`).
+Para actualizar el motor hay que distribuir una nueva versión del cliente.
 
 ## Trade-offs por cliente
 
-| | Fox | Dart |
+| | Fox | Dart / C# / TS / Python |
 |---|---|---|
-| Lenguaje del driver | VFP (`.prg`) | Dart subset (compilado a `.evc`) |
-| Tipo de payload | Texto | Binario (bytecode) |
-| Tamaño típico | 50-200 KB | 10-15 KB |
-| Subset del lenguaje | Toda VFP funciona | Subset de Dart (ver `dart-eval-limitations.md`) |
-| Velocidad | Lenta (interpretado) | ~5-20× más lento que AOT, OK para validación |
-| Bridge a tipos host | No aplica (todo es VFP) | Manual con `$Bridge` o codegen |
-| Audiencia | ERPs legados | Apps Flutter / Dart server / CLI |
+| Motor | Dinámico (hot-swap) | Estático (embebido) |
+| Lenguaje del driver | VFP (`.prg`) | Nativo del cliente |
+| Actualización | Sin redeploy del cliente | Requiere nueva versión |
+| Complejidad de setup | Alta (server-ecf + BD) | Baja (solo HTTPS) |
+| Audiencia | ERPs VFP legados | Apps modernas cualquier lenguaje |
 
 ## Limitaciones de seguridad
 

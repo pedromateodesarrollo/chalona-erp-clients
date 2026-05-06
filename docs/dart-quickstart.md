@@ -91,13 +91,14 @@ Future<void> main() async {
 ## Cómo funciona internamente
 
 1. Tu código → `client.enviaEcfDesde(doc, portal: 'testecf')`.
-2. Cliente shell hace lazy-load del motor (lookup HTTP + descarga bytecode + verifica sha256).
-3. Motor (corriendo en runtime sandbox) recibe `documento`, valida, arma payload DGII (XML/JSON con `Encabezado`, `DetallesItems`, `Totales`, etc.).
-4. Cliente shell hace `POST /` a `https://ecf-service.vicortiz.com` con el payload y el token Bearer.
+2. Cliente shell (`ecf_client.dart`) pasa el estado al motor estático (`motor.dart`).
+3. Motor dice `{"kind":"http", "endpoint":"envia_ecf", ...}`.
+4. Shell hace `POST /` a `https://ecf-service.vicortiz.com` con el payload y el token Bearer.
 5. Server-ecf firma con certificado P12 de tu empresa, envía a DGII.
-6. Respuesta vuelve por la cadena → motor parsea → cliente shell devuelve `DocumentoEcf` enriquecido (con `encf`, `estado`, `timbre`, …).
+6. Respuesta vuelve: motor devuelve `{"kind":"done", "result":{...}}` → shell devuelve `DocumentoEcf` enriquecido.
 
-**Auto-actualización del motor:** el cliente shell envía `dart_driver_version` en cada request. Si Chalona publica una nueva versión, el server responde `dart_cliente_driver.version_desactualizada` y el shell la baja automáticamente y reintenta. Tu código no se entera.
+El motor vive embebido estáticamente en `motor.dart` — no hay descarga dinámica
+ni dependencia a Postgres.
 
 ## Tipos de comprobante
 
@@ -162,17 +163,15 @@ ECF_PORTAL=testecf                                   # 'testecf' o 'ecf'
 
 ## Self-hosting (avanzado)
 
-Si querés hospedar tu propio motor (forkear el patrón hot-reload para tu producto):
+Si querés levantar tu propio server-ecf:
 
-1. Aplicar `chalona-ecf/sql/schema.sql` a tu Postgres.
-2. Levantar tu propio server-ecf.
-3. Usar `bin/actualiza-cliente-dart` (en el monorepo Chalona) para publicar versiones del motor.
-4. Apuntar el cliente con `EcfClient(baseUrl: 'https://tu-dominio.com', motorEntorno: 'test')`.
+1. Aplicar el schema de BD del monorepo Chalona.
+2. Levantar `server_ecf` (ver `ecf/server/`).
+3. Apuntar el cliente con `EcfClient(baseUrl: 'https://tu-dominio.com')`.
 
 Para integradores normales esto **no aplica** — solo necesitás las credenciales de usuario.
 
 ## Referencias
 
 - Cliente Dart: `chalona-ecf/dart-driver/README.md` (API completa + ejemplos por tipo).
-- Limitaciones de `dart_eval` (runtime del motor): `chalona-ecf/docs/dart-eval-limitations.md`.
 - Arquitectura general: `chalona-ecf/docs/architecture.md`.
