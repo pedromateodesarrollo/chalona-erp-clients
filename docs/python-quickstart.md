@@ -23,7 +23,20 @@ pip install -e .
 No es obligatorio — los scripts en `bin/` añaden `src/` al `sys.path`
 automáticamente.
 
+## Dos formas de enviar
+
+El driver expone **dos vías** de envío. Elegir según necesidad:
+
+| Vía | Cuándo usar | Sección |
+|---|---|---|
+| **A. JSON directo** | El ERP ya genera el payload DGII completo (`Encabezado`, `DetallesItems`, ...). Sin validación local. | [Uso mínimo](#uso-mínimo) |
+| **B. Clases tipadas (documentos prediseñados)** | Construir el comprobante en código Python con validación local (campos requeridos, formatos, RNC, fechas) **antes** de enviar. | [Clases tipadas](#clases-tipadas-por-comprobante-opcional) |
+
+Ambas vías comparten el mismo `EcfClient` (login, token, transporte HTTP). La diferencia es solo cómo se arma el payload.
+
 ## Uso mínimo
+
+> Vía A — JSON directo. El payload completo lo trae el ERP.
 
 ```python
 import sys
@@ -169,8 +182,11 @@ ni dependencia a Postgres.
 
 ## Clases tipadas por comprobante (opcional)
 
-Para construir payloads con validación local antes de enviar, usar el submódulo
-`chalona_driver.comprobantes`:
+> Vía B — documentos prediseñados. Validación local antes del envío.
+
+Para construir payloads campo a campo con validación local (RNC, fechas
+`dd-mm-yyyy`, requeridos, formatos numéricos), usar el submódulo
+`chalona_driver.comprobantes`. Cada clase corresponde a un `TipoeCF`:
 
 ```python
 from chalona_driver import EcfClient
