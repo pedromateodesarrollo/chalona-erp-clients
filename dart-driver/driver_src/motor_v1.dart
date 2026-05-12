@@ -54,8 +54,69 @@ String procesar(String estadoJson) {
     return _flowConsultaEstado(args, step, lastResp);
   } else if (fnName == 'descargaXmls') {
     return _flowDescargaXmls(args, step, lastResp);
+  } else if (fnName == 'anularRangos') {
+    return _flowAnularRangos(args, step, lastResp);
+  } else if (fnName == 'consultaApi') {
+    return _flowConsultaApi(args, step, lastResp);
   }
   return _fail('motor.fn_desconocida', {'fnName': fnName});
+}
+
+// ---------------------------------------------------------------------------
+// Anular rangos de e-NCF (servicio DGII AnulacionECF, vía server-ecf).
+// args: { rnc, portal, tipo, rangos:[{desde,hasta},...] }
+// ---------------------------------------------------------------------------
+String _flowAnularRangos(
+  Map<String, Object?> args,
+  int step,
+  Map<String, Object?>? lastResp,
+) {
+  if (step == 0) {
+    final portal = _str(args, 'portal').trim();
+    final tipo = _str(args, 'tipo').trim();
+    final rangos = args['rangos'];
+    if (portal != 'ecf' && portal != 'testecf' && portal != 'certecf') {
+      return _fail('motor.anular_rangos.portal_invalido', {'portal': portal});
+    }
+    if (tipo.isEmpty) {
+      return _fail('motor.anular_rangos.tipo_requerido');
+    }
+    if (rangos is! List || rangos.isEmpty) {
+      return _fail('motor.anular_rangos.rangos_requeridos');
+    }
+    return _http('ecf_anular_rangos', {
+      'portal': portal,
+      'tipo': tipo,
+      'rangos': rangos,
+    }, useToken: true, nextStep: 1);
+  }
+  return _done(_respData(lastResp));
+}
+
+// ---------------------------------------------------------------------------
+// Macro genérica: invoca cualquier endpoint del server-ecf sin necesidad de
+// recompilar el shell. Toda función nueva del servidor se accede vía esta.
+// args: { request:"endpoint_id", data:{...}, useToken:bool? (default true) }
+// ---------------------------------------------------------------------------
+String _flowConsultaApi(
+  Map<String, Object?> args,
+  int step,
+  Map<String, Object?>? lastResp,
+) {
+  if (step == 0) {
+    final endpoint = _str(args, 'request').trim();
+    if (endpoint.isEmpty) {
+      return _fail('motor.consulta_api.request_requerido');
+    }
+    final raw = args['data'];
+    final data = raw is Map
+        ? Map<String, Object?>.from(raw)
+        : <String, Object?>{};
+    final useTokenRaw = args['useToken'];
+    final useToken = useTokenRaw is bool ? useTokenRaw : true;
+    return _http(endpoint, data, useToken: useToken, nextStep: 1);
+  }
+  return _done(_respData(lastResp));
 }
 
 // ---------------------------------------------------------------------------

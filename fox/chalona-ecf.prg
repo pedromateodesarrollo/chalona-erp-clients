@@ -646,7 +646,7 @@ Function ChalonaEcfBuildDocJsonFox
   Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
     lnIndFact = 4
   Case lnTipoEcf = 46
-    lnIndFact = 3
+    lnIndFact = Iif(lnItbis = 0, 3, 1)
   Case lnItbis = 0
     lnIndFact = 4
   Otherwise
@@ -756,7 +756,12 @@ Function ChalonaEcfBuildDocJsonFox
       Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
         lnSumExento = lnSumExento + lnMontoItem
       Case lnTipoEcf = 46
-        lnSumGravadoI3 = lnSumGravadoI3 + lnMontoItem
+        If lnItbis = 0
+          lnSumGravadoI3 = lnSumGravadoI3 + lnMontoItem
+        Else
+          lnSumGravadoI1 = lnSumGravadoI1 + lnMontoItem
+          lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
+        Endif
       Case lnTasaLin > 0
         lnSumGravadoI1 = lnSumGravadoI1 + lnMontoItem
         lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
@@ -775,7 +780,12 @@ Function ChalonaEcfBuildDocJsonFox
         Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
           lnSumExentoOM = lnSumExentoOM + lnMontoItemOMloc
         Case lnTipoEcf = 46
-          lnSumGravadoI3OM = lnSumGravadoI3OM + lnMontoItemOMloc
+          If lnItbis = 0
+            lnSumGravadoI3OM = lnSumGravadoI3OM + lnMontoItemOMloc
+          Else
+            lnSumGravadoI1OM = lnSumGravadoI1OM + lnMontoItemOMloc
+            lnSumItbisI1OM = lnSumItbisI1OM + lnItbisLinOM
+          Endif
         Case lnItbisLineaVal = 0
           lnSumExentoOM = lnSumExentoOM + lnMontoItemOMloc
         Otherwise
@@ -868,20 +878,36 @@ Function ChalonaEcfBuildDocJsonFox
         '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
     Endif
   Case lnTipoEcf = 46
-    * Nota 51 DGII: tasa cero -> MontoGravadoI3, no MontoGravadoI1.
-    lcTot = "{" + ;
-      '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
-      '"MontoGravadoI1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-      '"MontoGravadoI2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-      '"MontoGravadoI3":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
-      '"MontoExento":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-      '"TotalITBIS":' + _ChalonaEcfJsonNum(lnItbis, 2) + "," + ;
-      '"ITBIS1":' + Transform(Iif(lnItbis = 0, 0, lnItbis1)) + "," + ;
-      '"ITBIS2":0,"ITBIS3":0,' + ;
-      '"TotalITBIS1":' + _ChalonaEcfJsonNum(lnItbis, 2) + "," + ;
-      '"TotalITBIS2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-      '"TotalITBIS3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-      '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
+    If lnItbis = 0
+      * Nota 51 DGII: tasa cero -> MontoGravadoI3, no MontoGravadoI1.
+      lcTot = "{" + ;
+        '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
+        '"MontoGravadoI1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"MontoGravadoI2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"MontoGravadoI3":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
+        '"MontoExento":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"TotalITBIS":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"ITBIS1":0,"ITBIS2":0,"ITBIS3":0,' + ;
+        '"TotalITBIS1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"TotalITBIS2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"TotalITBIS3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
+    Else
+      * Con ITBIS: slot 1 (ITBIS1). MontoGravadoI1*ITBIS1/100 = TotalITBIS1 (DGII 11004).
+      lcTot = "{" + ;
+        '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
+        '"MontoGravadoI1":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
+        '"MontoGravadoI2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"MontoGravadoI3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"MontoExento":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"TotalITBIS":' + _ChalonaEcfJsonNum(lnItbis, 2) + "," + ;
+        '"ITBIS1":' + Transform(lnItbis1) + "," + ;
+        '"ITBIS2":0,"ITBIS3":0,' + ;
+        '"TotalITBIS1":' + _ChalonaEcfJsonNum(lnItbis, 2) + "," + ;
+        '"TotalITBIS2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"TotalITBIS3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+        '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
+    Endif
   Case lnItbis = 0
     * Si el detalle suma exento, usar la suma (cabecera valor puede estar en 0).
     Local lnExentoFinal, lnTotalFinalCab
@@ -1053,10 +1079,12 @@ Function ChalonaEcfBuildDocJsonFox
       Endif
       lcNomItem = Left(lcNomItem, 80)
       lcDescItem = _ChalonaEcfNormalizeTexto(lcDescItem)
-      If _ChalonaEcfNzNum(mercs_servicio) = 0
-        lnIndBS = 1
+      * Tipo 41: IndicadorBienoServicio derivado de ISR (bien si ISR=0, servicio si ISR>0).
+      * Evita inconsistencia DGII 272: mercs_servicio puede estar mal en el catálogo.
+      If lnTipoEcf = 41
+        lnIndBS = Iif(lnIsr > 0, 2, 1)
       Else
-        lnIndBS = 2
+        lnIndBS = Iif(_ChalonaEcfNzNum(mercs_servicio) = 0, 1, 2)
       Endif
       lcDet = lcDet + "{" + ;
         '"NumeroLinea":1,' + ;
@@ -1107,10 +1135,11 @@ Function ChalonaEcfBuildDocJsonFox
         Endif
         lcNomItem = Left(lcNomItem, 80)
         lcDescItem = _ChalonaEcfNormalizeTexto(lcDescItem)
-        If _ChalonaEcfNzNum(mercs_servicio) = 0
-          lnIndBS = 1
+        * Tipo 41: IndicadorBienoServicio derivado de ISR (bien si ISR=0, servicio si ISR>0).
+        If lnTipoEcf = 41
+          lnIndBS = Iif(lnIsr > 0, 2, 1)
         Else
-          lnIndBS = 2
+          lnIndBS = Iif(_ChalonaEcfNzNum(mercs_servicio) = 0, 1, 2)
         Endif
         * IndicadorFacturacion por línea: tipos con override fijo (43/44/47=4, 46=3) lo usan;
         * resto: 4 si la línea no tiene ITBIS (imtrd.itbis=0 o columna ausente con cabecera exenta), 1 si lo tiene.
@@ -1126,7 +1155,7 @@ Function ChalonaEcfBuildDocJsonFox
         Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
           lnIndFactLin = 4
         Case lnTipoEcf = 46
-          lnIndFactLin = 3
+          lnIndFactLin = Iif(lnItbis = 0, 3, 1)
         Case lnTasaLinIF = 16
           lnIndFactLin = 2
         Case lnTasaLinIF > 0
@@ -1220,6 +1249,8 @@ Define Class ChalonaEcf As Custom
   * Debe exponer: servidor_ecf, usuario_sync, pass_sync, portal_dgii,
   * dgii_multimoneda (todas como cadenas).
   Cfg = .Null.
+  * .T. cuando SetConfig() fue llamada con cfg externo; .F. = default desde osis (se re-lee en vivo).
+  CfgEsExterna = .F.
   * Si .F., Enviar no abre el formulario largo; igual se muestra MESSAGEBOX breve si hay error.
   MostrarFormularioError = .T.
 
@@ -1249,6 +1280,7 @@ Define Class ChalonaEcf As Custom
       Return
     Endif
     This.Cfg = toCfg
+    This.CfgEsExterna = .T.
     This.Usuario = ChalonaEcfCfgProp("usuario_sync", This.Cfg)
     This.Clave   = ChalonaEcfCfgProp("pass_sync",    This.Cfg)
     This.Portal  = Lower(ChalonaEcfCfgProp("portal_dgii", This.Cfg))
@@ -1257,6 +1289,21 @@ Define Class ChalonaEcf As Custom
       This.BaseUrl = lcUrl
     Endif
   Endproc
+
+  * Portal en vivo: si cfg fue inyectada externamente usa This.Cfg; si no, lee osis en el momento.
+  * Evita que cambios en osis.portal_dgii post-init queden ignorados.
+  Function _PortalActual
+    Local lcP
+    lcP = ""
+    If This.CfgEsExterna
+      lcP = Lower(ChalonaEcfCfgProp("portal_dgii", This.Cfg))
+    Else
+      If Type("osis") = "O" And Pemstatus(osis, "portal_dgii", 5)
+        lcP = Lower(Alltrim(Nvl(osis.portal_dgii, "")))
+      Endif
+    Endif
+    Return Iif(Empty(lcP), This.Portal, lcP)
+  Endfunc
 
   * Normaliza BaseUrl (siempre termina en /)
   Function GetBaseUrl
@@ -1275,7 +1322,7 @@ Define Class ChalonaEcf As Custom
 
     lcUsuario = This.Usuario
     lcClave   = This.Clave
-    lcPortal  = This.Portal
+    lcPortal  = This._PortalActual()
 
     If Empty(lcUsuario) Or Empty(lcClave)
       This.Token = ""
@@ -1370,7 +1417,7 @@ Define Class ChalonaEcf As Custom
 
         lcUsuario = This.Usuario
         lcClave   = This.Clave
-        lcPortal  = This.Portal
+        lcPortal  = This._PortalActual()
 
         If Empty(lcUsuario) Or Empty(lcClave)
           loResp = ChalonaResponseNew(.F., "usuario/clave requeridos", "", "")
@@ -1569,6 +1616,159 @@ Define Class ChalonaEcf As Custom
     * Para funciones genÃƒÆ’Ã‚Â©ricas usamos la raÃƒÆ’Ã‚Â­z como endpoint HTTP y request en el body
     loOut = This._HttpPostJson(lcBaseUrl, lcReq, This.Token)
     Return loOut
+  Endproc
+
+  * ConsultaApi(tcRequest, tcDataJson) -> ChalonaResponse
+  *
+  * Macro genérica para invocar cualquier endpoint del servidor ECF sin necesidad
+  * de recompilar el loader. Permite que aparezcan funciones nuevas en el motor
+  * dinámico (este script publicado en data.fox_cliente_script) y que cualquier
+  * ERP las invoque vía chalonaConsultaApi() sin tocar su .prg local.
+  *
+  *   tcRequest   : Nombre del endpoint registrado en server-ecf
+  *                 (ej: "ecf_anular_rangos", "ecf_anular_rangos_lista",
+  *                 "consulta_estado", "ecf_registro_select", etc.).
+  *   tcDataJson  : Objeto JSON con los parámetros del endpoint. Vacío => "{}".
+  *                 Si pasa una cadena vacía o "{}", se manda data:{"locale":"es"}.
+  *                 El campo "locale" se agrega si no viene.
+  *
+  * Respuesta: ChalonaResponse (.ok, .message, .data, .rawBody).
+  Procedure ConsultaApi
+    Lparameters tcRequest, tcDataJson
+    Local lcRequest, lcDataJson, lcBaseUrl, lcReq, loOut, lcDataInner
+
+    lcRequest  = Iif(Vartype(tcRequest)  = "C", Alltrim(tcRequest),  "")
+    lcDataJson = Iif(Vartype(tcDataJson) = "C", Alltrim(tcDataJson), "")
+
+    If Empty(lcRequest)
+      Return ChalonaResponseNew(.F., "err.consulta_api.request_requerido", "", "")
+    Endif
+
+    This._Login()
+    If Empty(This.Token)
+      Return ChalonaResponseNew(.F., "login.fallo", "", "")
+    Endif
+
+    lcBaseUrl = This.GetBaseUrl()
+
+    * Permitir tcDataJson vacío o un objeto JSON ya armado. Se inyecta locale="es"
+    * si no viene en el JSON original.
+    If Empty(lcDataJson) Or lcDataJson == "{}"
+      lcDataInner = '"locale":"es"'
+    Else
+      * Quitar { y } extremos para poder concatenar locale si falta.
+      Local lcTrim
+      lcTrim = lcDataJson
+      If Left(lcTrim, 1) = "{"
+        lcTrim = Substr(lcTrim, 2)
+      Endif
+      If Right(lcTrim, 1) = "}"
+        lcTrim = Left(lcTrim, Len(lcTrim) - 1)
+      Endif
+      lcTrim = Alltrim(lcTrim)
+      If Atc('"locale"', lcTrim) = 0
+        If Empty(lcTrim)
+          lcDataInner = '"locale":"es"'
+        Else
+          lcDataInner = '"locale":"es",' + lcTrim
+        Endif
+      Else
+        lcDataInner = lcTrim
+      Endif
+    Endif
+
+    lcReq = '{"request":"' + _JsonEscape(lcRequest) + '","data":{' + lcDataInner + '}}'
+
+    loOut = This._HttpPostJson(lcBaseUrl, lcReq, This.Token)
+    Return loOut
+  Endproc
+
+  * AnularRangos(tcTipo, tcRangosJson) -> ChalonaResponse
+  *
+  * Anula rangos de e-NCF no utilizados ante la DGII (servicio AnulacionECF).
+  *   tcTipo        : TipoeCF DGII como string. Ej "31", "32", "33", "34", "41", "43"..."47".
+  *   tcRangosJson  : JSON array de rangos. Ej:
+  *                   '[{"desde":"1","hasta":"10"},{"desde":"25","hasta":"25"}]'
+  *
+  * Una llamada = un XML ANECF firmado = un TipoeCF. Para anular varios tipos,
+  * llamar este metodo una vez por tipo.
+  *
+  * El servidor valida primero contra data.ecf (NCF emitido / pendiente) y
+  * data.ecf_anulacion (rangos ya anulados); si hay conflictos no recuperables,
+  * la llamada falla antes de enviar a DGII.
+  *
+  * Respuesta exitosa (loResp.data): { id, estado, codigo, cantidad,
+  *   rangos_anulados:[...], rangos_rechazados:[...], mensajes:[...] }.
+  * estado: "Aceptado" | "Aceptado Parcial" | "Rechazado" | "Error".
+  Procedure AnularRangos
+    Lparameters tcTipo, tcRangosJson
+    Local lcTipo, lcRangos, lcBaseUrl, lcReq, loOut
+
+    lcTipo   = Iif(Vartype(tcTipo) = "C", Alltrim(tcTipo), "")
+    lcRangos = Iif(Vartype(tcRangosJson) = "C", Alltrim(tcRangosJson), "")
+
+    If Empty(lcTipo)
+      Return ChalonaResponseNew(.F., "err.ecf_anulacion.tipo_no_soportado", "", "")
+    Endif
+    If Empty(lcRangos)
+      Return ChalonaResponseNew(.F., "err.ecf_anulacion.rangos_requeridos", "", "")
+    Endif
+
+    This._Login()
+    If Empty(This.Token)
+      Return ChalonaResponseNew(.F., "login.fallo", "", "")
+    Endif
+
+    lcBaseUrl = This.GetBaseUrl()
+
+    lcReq = '{'
+    lcReq = lcReq + '"request":"ecf_anular_rangos",'
+    lcReq = lcReq + '"data":{'
+    lcReq = lcReq + '"locale":"es",'
+    lcReq = lcReq + '"portal":"' + _JsonEscape(This._PortalActual()) + '",'
+    lcReq = lcReq + '"tipo":"' + _JsonEscape(lcTipo) + '",'
+    lcReq = lcReq + '"rangos":' + lcRangos
+    lcReq = lcReq + '}}'
+
+    loOut = This._HttpPostJson(lcBaseUrl, lcReq, This.Token)
+    Return loOut
+  Endproc
+
+  * AnularRangosArr(tcTipo, taRangos) -> ChalonaResponse
+  *
+  * Variante que recibe un array Fox 2D: taRangos(N, 2). Cada fila = (desde, hasta).
+  * Lo serializa a JSON y delega en AnularRangos().
+  *   DIMENSION laRangos(2, 2)
+  *   laRangos(1,1) = "1"
+  *   laRangos(1,2) = "10"
+  *   laRangos(2,1) = "25"
+  *   laRangos(2,2) = "25"
+  *   loResp = goChalonaEcf.AnularRangosArr("31", @laRangos)
+  Procedure AnularRangosArr
+    Lparameters tcTipo, taRangos
+    Local lnFilas, lnI, lcJson, lcDesde, lcHasta
+
+    If Vartype(taRangos) # "A"
+      Return ChalonaResponseNew(.F., "err.ecf_anulacion.rangos_requeridos", "", "")
+    Endif
+
+    lnFilas = Alen(taRangos, 1)
+    If lnFilas <= 0
+      Return ChalonaResponseNew(.F., "err.ecf_anulacion.rangos_requeridos", "", "")
+    Endif
+
+    lcJson = "["
+    For lnI = 1 To lnFilas
+      lcDesde = Transform(Iif(Vartype(taRangos(lnI, 1)) = "C", Alltrim(taRangos(lnI, 1)), Transform(taRangos(lnI, 1))))
+      lcHasta = Transform(Iif(Vartype(taRangos(lnI, 2)) = "C", Alltrim(taRangos(lnI, 2)), Transform(taRangos(lnI, 2))))
+      If lnI > 1
+        lcJson = lcJson + ","
+      Endif
+      lcJson = lcJson + '{"desde":"' + _JsonEscape(lcDesde) + '","hasta":"' + _JsonEscape(lcHasta) + '"}'
+    Endfor
+    lcJson = lcJson + "]"
+
+    Return This.AnularRangos(tcTipo, lcJson)
   Endproc
 
   * Recuperar estados "En Proceso" en imtr. Candado = una instancia activa por vez;
@@ -2003,7 +2203,7 @@ Define Class ChalonaEcf As Custom
         Endif
         lcUsuario = This.Usuario
         lcClave   = This.Clave
-        lcPortal  = This.Portal
+        lcPortal  = This._PortalActual()
         If Empty(lcUsuario) Or Empty(lcClave) Or Empty(lcPortal)
           loResp = ChalonaResponseNew(.F., "credenciales.requeridas", "", "")
           Exit
@@ -3976,13 +4176,25 @@ Endfunc
 
 Function _JsonEscape
   Lparameters tc
-  Local lc
+  Local lc, i
   lc = Nvl(tc, "")
   lc = Strtran(lc, "\", "\\")
   lc = Strtran(lc, '"', '\"')
   lc = Strtran(lc, Chr(13) + Chr(10), "\n")
   lc = Strtran(lc, Chr(13), "\n")
   lc = Strtran(lc, Chr(10), "\n")
+  lc = Strtran(lc, Chr(9), "\t")
+  * Eliminar otros chars de control (0x01-0x08, 0x0B, 0x0C, 0x0E-0x1F) que rompen JSON.
+  For i = 1 To 31
+    Do Case
+      Case i = 9 Or i = 10 Or i = 13
+        * ya manejados
+      Otherwise
+        If Chr(i) $ lc
+          lc = Strtran(lc, Chr(i), "")
+        Endif
+    Endcase
+  Endfor
   Return lc
 Endfunc
 

@@ -70,6 +70,72 @@ Function chalonaSincronizaEstados
   Return loResp
 Endfunc
 
+* chalonaConsultaApi(tcRequest, tcDataJson) -> ChalonaResponse
+*
+* Macro genérica para invocar CUALQUIER endpoint del servidor ECF sin tener
+* que recompilar el loader cuando aparece una funcionalidad nueva. El motor
+* dinámico (chalona-ecf.prg en data.fox_cliente_script) implementa la lógica;
+* el loader solo enruta el nombre y el JSON de parámetros.
+*
+*   tcRequest   : Nombre del endpoint (ej "ecf_anular_rangos_lista").
+*   tcDataJson  : JSON con los parámetros. "" o "{}" envía solo locale.
+*
+* Ejemplo:
+*   loResp = chalonaConsultaApi("ecf_anular_rangos_lista", "{}")
+*   loResp = chalonaConsultaApi("ecf_anular_rangos_select", '{"id":3}')
+*   loResp = chalonaConsultaApi("ecf_anular_rangos", ;
+*            '{"portal":"testecf","tipo":"31","rangos":[{"desde":"1","hasta":"10"}]}')
+Function chalonaConsultaApi
+  Lparameters tcRequest, tcDataJson
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.ConsultaApi(tcRequest, tcDataJson)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.ConsultaApi(tcRequest, tcDataJson)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
+* chalonaAnularRangos(tcTipo, tcRangosJson) -> ChalonaResponse
+*   tcTipo        : TipoeCF DGII ("31","32","33","34","41","43","44","45","46","47").
+*   tcRangosJson  : JSON array. Ej: '[{"desde":"1","hasta":"10"}]'.
+*   Una llamada = un XML ANECF firmado = un TipoeCF.
+Function chalonaAnularRangos
+  Lparameters tcTipo, tcRangosJson
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.AnularRangos(tcTipo, tcRangosJson)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.AnularRangos(tcTipo, tcRangosJson)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
+* chalonaAnularRangosArr(tcTipo, taRangos) -> ChalonaResponse
+*   taRangos      : array Fox 2D. taRangos(N, 2) con (desde, hasta) por fila.
+Function chalonaAnularRangosArr
+  Lparameters tcTipo, taRangos
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.AnularRangosArr(tcTipo, @taRangos)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.AnularRangosArr(tcTipo, @taRangos)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
 * chalonaDescargaDocumentosEcf(tcFechaDesde, tcFechaHasta [, tcTiposJson]) -> ChalonaResponse
 Function chalonaDescargaDocumentosEcf
   Lparameters tcFechaDesde, tcFechaHasta, tcTiposJson

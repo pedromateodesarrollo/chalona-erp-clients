@@ -38,6 +38,8 @@ public sealed class MotorEcfV1 : IMotorEcf
                 "enviaEcfDesdeDoc" => FlowEnviaEcfDesdeDoc(args, step, lastResp),
                 "consultaEstado" => FlowConsultaEstado(args, step, lastResp),
                 "descargaXmls" => FlowDescargaXmls(args, step, lastResp),
+                "anularRangos" => FlowAnularRangos(args, step, lastResp),
+                "consultaApi" => FlowConsultaApi(args, step, lastResp),
                 _ => Fail("motor.fn_desconocida", new JsonObject { ["fnName"] = fnName }),
             };
         }
@@ -326,6 +328,60 @@ public sealed class MotorEcfV1 : IMotorEcf
         var o = new JsonObject { ["kind"] = "done", ["result"] = result };
         if (!string.IsNullOrEmpty(newToken)) o["newToken"] = newToken;
         return o.ToJsonString();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Anular rangos de e-NCF (servicio DGII AnulacionECF, vía server-ecf).
+    // args: { rnc, portal, tipo, rangos:[{desde,hasta}...] }
+    // ---------------------------------------------------------------------------
+    private static string FlowAnularRangos(JsonElement args, int step, JsonElement? lastResp)
+    {
+        if (step == 0)
+        {
+            var portal = Str(args, "portal").Trim();
+            var tipo = Str(args, "tipo").Trim();
+            if (portal != "ecf" && portal != "testecf" && portal != "certecf")
+                return Fail("motor.anular_rangos.portal_invalido", new JsonObject { ["portal"] = portal });
+            if (tipo.Length == 0)
+                return Fail("motor.anular_rangos.tipo_requerido");
+            if (!args.TryGetProperty("rangos", out var rangosEl) ||
+                rangosEl.ValueKind != JsonValueKind.Array ||
+                rangosEl.GetArrayLength() == 0)
+                return Fail("motor.anular_rangos.rangos_requeridos");
+            return Http("ecf_anular_rangos", new JsonObject
+            {
+                ["portal"] = portal,
+                ["tipo"] = tipo,
+                ["rangos"] = JsonNode.Parse(rangosEl.GetRawText()),
+            }, useToken: true, nextStep: 1);
+        }
+        return Done(RespData(lastResp).ValueKind == JsonValueKind.Object
+            ? JsonNode.Parse(RespData(lastResp).GetRawText())!.AsObject()
+            : new JsonObject());
+    }
+
+    // ---------------------------------------------------------------------------
+    // Macro genérica: invoca cualquier endpoint del server-ecf.
+    // args: { request:"endpoint_id", data:{...}, useToken:bool? (default true) }
+    // ---------------------------------------------------------------------------
+    private static string FlowConsultaApi(JsonElement args, int step, JsonElement? lastResp)
+    {
+        if (step == 0)
+        {
+            var endpoint = Str(args, "request").Trim();
+            if (endpoint.Length == 0)
+                return Fail("motor.consulta_api.request_requerido");
+            JsonNode? dataNode = null;
+            if (args.TryGetProperty("data", out var dEl) && dEl.ValueKind == JsonValueKind.Object)
+                dataNode = JsonNode.Parse(dEl.GetRawText());
+            var data = dataNode is JsonObject jo ? jo : new JsonObject();
+            var useToken = !(args.TryGetProperty("useToken", out var ut) &&
+                             ut.ValueKind == JsonValueKind.False);
+            return Http(endpoint, data, useToken: useToken, nextStep: 1);
+        }
+        return Done(RespData(lastResp).ValueKind == JsonValueKind.Object
+            ? JsonNode.Parse(RespData(lastResp).GetRawText())!.AsObject()
+            : new JsonObject());
     }
 
     private static string Fail(string code, JsonObject? data = null)
