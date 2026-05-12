@@ -1,0 +1,46 @@
+{
+  "Encabezado": {
+    "Version": "1.0",
+    "IdDoc": {
+      "TipoeCF": "31",
+      "eNCF": "E310000000001",
+      "FechaVencimientoSecuencia": "31-12-2025",
+      "IndicadorMontoGravado": "0",
+      "TipoIngresos": "01",
+      "TipoPago": "1"
+    },
+    "Emisor": {
+      "RNCEmisor": "133193312",
+      "RazonSocialEmisor": "EMISOR PRUEBA",
+      "NombreComercial": "EMISOR PRUEBA",
+      "DireccionEmisor": "DIRECCION PRUEBA",
+      "FechaEmision": "01-04-2020"
+    },
+    "Comprador": {
+      "RNCComprador": "01800451302",
+      "RazonSocialComprador": "COMPRADOR PRUEBA",
+      "ContactoComprador": "CONTACTO",
+      "CorreoComprador": "test@ejemplo.com",
+      "DireccionComprador": "DIRECCION COMPRADOR"
+    },
+    "Totales": {
+      "MontoGravadoTotal": "1000.00",
+      "MontoGravadoI1": "1000.00",
+      "ITBIS1": "18",
+      "TotalITBIS": "180.00",
+      "TotalITBIS1": "180.00",
+      "MontoTotal": "1180.00"
+    }
+  },
+  "DetallesItems": [
+    {
+      "NumeroLinea": "1",
+      "IndicadorFacturacion": "1",
+      "NombreItem": "Item prueba",
+      "IndicadorBienoServicio": "1",
+      "CantidadItem": "1.00",
+      "PrecioUnitarioItem": "1000.00",
+      "MontoItem": "1000.00"
+    }
+  ]
+}

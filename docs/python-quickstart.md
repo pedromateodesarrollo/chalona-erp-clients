@@ -167,6 +167,35 @@ ni dependencia a Postgres.
 | `46` | Exportación |
 | `47` | Pagos al Exterior |
 
+## Clases tipadas por comprobante (opcional)
+
+Para construir payloads con validación local antes de enviar, usar el submódulo
+`chalona_driver.comprobantes`:
+
+```python
+from chalona_driver import EcfClient
+from chalona_driver.comprobantes import (
+    FacturaCreditoFiscal31, EmisorData, CompradorData, DetalleItem,
+)
+
+client = EcfClient()
+client.login('mi_correo@empresa.com', 'mi_clave')
+
+c = FacturaCreditoFiscal31()
+c.encf = 'E310000000001'
+c.fecha_emision = '06-05-2026'
+c.emisor = EmisorData(rnc='131996035', razon_social='Mi SRL', direccion='Calle 1')
+c.comprador = CompradorData(rnc='01800451302', razon_social='Cliente SA')
+# ... detalles y totales
+
+c.validate()                # lanza EcfValidationError si falta o malformado
+r = c.enviar(client, rnc='131996035', portal='testecf')
+```
+
+Clases disponibles: `FacturaCreditoFiscal31`, `FacturaConsumo32`, `NotaDebito33`,
+`NotaCredito34`, `Compras41`, `GastosMenores43`, `RegimenEspecial44`,
+`Gubernamental45`, `Exportacion46`, `PagosExterior47`.
+
 ## Layout del cliente
 
 ```
@@ -179,7 +208,10 @@ python-driver/
 │   ├── contract.py       # ABC ComprobanteDriver (validaciones)
 │   ├── loader.py         # carga drivers de pre-validación vía exec()
 │   ├── postgres_source.py
-│   └── compiler.py
+│   ├── compiler.py
+│   ├── exceptions.py     # EcfValidationError (clases tipadas)
+│   └── comprobantes/     # clases tipadas 31-34, 41-47 + validation.py
+├── tests/                # unit (comprobantes) + integration (HTTP real)
 └── bin/
     ├── demo_envio.py             # demo 10 tipos → testecf
     └── prueba_comprobantes_driver.py
