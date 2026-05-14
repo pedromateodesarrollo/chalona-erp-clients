@@ -740,13 +740,15 @@ Function ChalonaEcfBuildDocJsonFox
       If lnMontoItem = 0
         Loop
       Endif
-      * ITBIS sobre el MONTO NETO (con descuento aplicado), no sobre el bruto.
-      * imtrd.itbis viene calculado por el ERP sobre el bruto: produce TotalITBIS1 inflado y rechazo DGII 11014.
-      lnItbisLin = Round(lnMontoItem * lnItbis1 / 100, 2)
+      * ITBIS por línea: tomar imtrd.itbis tal cual del ERP (fuente de verdad
+      * para coherencia con NC posteriores). Si la columna no existe, recalcular
+      * sobre el monto neto como fallback.
       If llDetTieneItbis
         lnItbisLineaVal = _ChalonaEcfNzNum(itbis)
+        lnItbisLin = Round(lnItbisLineaVal, 2)
       Else
         lnItbisLineaVal = Iif(lnItbis > 0, 1, 0)
+        lnItbisLin = Round(lnMontoItem * lnItbis1 / 100, 2)
       Endif
       * itbis_tasa por linea (override DGII): >0 fuerza gravado, 0 con itbis=0 => exento.
       Local lnTasaLin
