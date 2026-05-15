@@ -53,6 +53,7 @@ data.
 | [`dart-driver/`](dart-driver/) | Cliente Dart — para apps modernas (Flutter / Dart server / CLI) |
 | [`csharp/`](csharp/) | Cliente C# / .NET — Roslyn + AssemblyLoadContext, hot-swap real con `Unload()` |
 | [`typescript-driver/`](typescript-driver/) | Cliente TypeScript — JS source via `node:vm` sandbox, sin deps de runtime |
+| [`nodejs-driver/`](nodejs-driver/) | Cliente Node.js puro — JS source directo via `node:vm`, sin TS ni compilación |
 | [`python-driver/`](python-driver/) | Cliente Python — `.py` source via `exec()` en namespace aislado, stdlib only |
 | [`sql/`](sql/) | Schema Postgres standalone (tablas + funciones) |
 | [`docs/`](docs/) | Arquitectura, quickstarts, limitaciones |
@@ -99,6 +100,7 @@ motor lo publica Chalona. Solo necesitás credenciales de acceso al server.
 | Dart | Postgres directo (host/credenciales provistos por Chalona) | [dart-quickstart.md](docs/dart-quickstart.md) |
 | C# | Postgres directo | [csharp-quickstart.md](docs/csharp-quickstart.md) |
 | TypeScript | Postgres directo | [typescript-quickstart.md](docs/typescript-quickstart.md) |
+| Node.js (puro JS) | Postgres directo | [nodejs-quickstart.md](docs/nodejs-quickstart.md) |
 | Python | Postgres directo | [python-quickstart.md](docs/python-quickstart.md) |
 
 Cada quickstart incluye al final una sección "Self-hosting (avanzado)"
@@ -169,6 +171,7 @@ No polling. No push notifications. No installers. Logic ships with data.
 | `dart-driver/` | Dart client — for modern apps (Flutter / Dart server / CLI) |
 | `csharp/` | C# / .NET client — Roslyn + AssemblyLoadContext, real `Unload()` hot-swap |
 | `typescript-driver/` | TypeScript client — JS source via `node:vm` sandbox, no runtime deps |
+| `nodejs-driver/` | Pure Node.js client — JS source via `node:vm`, no TS, no compile step |
 | `python-driver/` | Python client — `.py` source via `exec()` in isolated namespace, stdlib only |
 | `sql/` | Standalone Postgres schema (tables + functions) |
 | `docs/` | Architecture, quickstarts, limitations |
@@ -206,6 +209,7 @@ Chalona publishes the engine. You just need server credentials.
 | Dart | Direct Postgres (host/creds provided by Chalona) | [dart-quickstart.md](docs/dart-quickstart.md) |
 | C# | Direct Postgres | [csharp-quickstart.md](docs/csharp-quickstart.md) |
 | TypeScript | Direct Postgres | [typescript-quickstart.md](docs/typescript-quickstart.md) |
+| Node.js (pure JS) | Direct Postgres | [nodejs-quickstart.md](docs/nodejs-quickstart.md) |
 | Python | Direct Postgres | [python-quickstart.md](docs/python-quickstart.md) |
 
 Each quickstart ends with a "Self-hosting (advanced)" section for

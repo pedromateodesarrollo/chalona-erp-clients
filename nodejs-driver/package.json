@@ -1,0 +1,14 @@
+{
+  "name": "@chalona/nodejs-driver",
+  "version": "0.1.0",
+  "description": "Cliente Node.js puro (JS, sin compilación) para e-CF con hot-reload via Postgres. Espejo de fox/dart/cs/ts/python.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "publicar": "node bin/publicar.js",
+    "prueba": "node bin/prueba-comprobantes-driver.js"
+  }
+}
