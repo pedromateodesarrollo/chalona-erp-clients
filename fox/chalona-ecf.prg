@@ -952,6 +952,18 @@ Function ChalonaEcfBuildDocJsonFox
         lnItbisI1Final = Round(lnSumGravadoI1 - lnGravI1Final, 2)
         lnTotalFinal = Round(lnSumGravadoI1 + lnSumExento + lnPropina, 2)
       Endif
+      * Blindaje DGII 11014: con IndicadorMontoGravado=0 y tasa>0, TotalITBIS1 debe
+      * cumplir base*tasa/100. Si imtrd.itbis del ERP es incoherente (sumatoria
+      * lnSumItbisI1 diverge mas de 0.05 del esperado), forzar recalculo desde la
+      * base para evitar rechazo DGII (caso RNC 101005165, ITBIS=999.70 vs 63267.54).
+      If lnIndicadorMontoGravado = 0 And lnItbis1 > 0 And lnGravI1Final > 0
+        lnItbisEsperado = Round(lnGravI1Final * lnItbis1 / 100, 2)
+        If Abs(lnItbisEsperado - lnItbisI1Final) > 0.05
+          ChalonaEcfLogError("ECF ITBIS detalle incoherente: ERP envio TotalITBIS1=" + Transform(lnItbisI1Final) + " pero base " + Transform(lnGravI1Final) + " x " + Transform(lnItbis1) + "% = " + Transform(lnItbisEsperado) + ". Recalculando desde la base (DGII 11014).", tcControl, "")
+          lnItbisI1Final = lnItbisEsperado
+          lnTotalFinal = Round(lnGravI1Final + lnSumExento + lnItbisI1Final + lnPropina, 2)
+        Endif
+      Endif
       lcTot = "{" + ;
         '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnGravI1Final, 2) + "," + ;
         '"MontoGravadoI1":' + _ChalonaEcfJsonNum(lnGravI1Final, 2) + "," + ;
@@ -961,6 +973,16 @@ Function ChalonaEcfBuildDocJsonFox
         '"TotalITBIS1":' + _ChalonaEcfJsonNum(lnItbisI1Final, 2) + "," + ;
         '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotalFinal, 2) + "}"
     Else
+      * Mismo blindaje en rama fallback (sin detalle): si imtr.itbis no cuadra
+      * con base*tasa/100, recalcular antes de armar el JSON.
+      If lnIndicadorMontoGravado = 0 And lnItbis1 > 0 And lnBaseGrav > 0
+        lnItbisEsperado = Round(lnBaseGrav * lnItbis1 / 100, 2)
+        If Abs(lnItbisEsperado - lnItbis) > 0.05
+          ChalonaEcfLogError("ECF ITBIS maestro incoherente: imtr.itbis=" + Transform(lnItbis) + " pero base " + Transform(lnBaseGrav) + " x " + Transform(lnItbis1) + "% = " + Transform(lnItbisEsperado) + ". Recalculando (DGII 11014).", tcControl, "")
+          lnItbis = lnItbisEsperado
+          lnTotal = Round(lnBaseGrav + lnItbis + lnPropina, 2)
+        Endif
+      Endif
       lcTot = "{" + ;
         '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
         '"MontoGravadoI1":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
