@@ -835,7 +835,18 @@ Function ChalonaEcfBuildDocJsonFox
     '"DireccionEmisor":"' + _JsonEscape(_ChalonaEcfNormalizeTexto(lcEmpDir)) + '",' + ;
     '"FechaEmision":"' + _JsonEscape(_ChalonaEcfFmtDdMmYy(ldFecEmi)) + '"}'
 
-  * Comprador extranjero: usar IdentificadorExtranjero y dejar RNCComprador vacÃ­o.
+  * XSD DGII por tipo: 31 (Credito Fiscal), 41 (Compras) y 45 (Gubernamental)
+  * NO admiten IdentificadorExtranjero (solo RNCComprador, obligatorio). 47 al reves
+  * (solo IdentificadorExtranjero). Resto (32/33/34/44/46): cualquiera de los dos.
+  * Si tipo prohibe IdentificadorExtranjero, forzar RNCComprador aunque el digito
+  * verificador no valide; DGII rechaza por RNC mejor que por elemento invalido.
+  If Inlist(lnTipoEcf, 31, 41, 45)
+    lnExtranjero = 0
+  Endif
+  If lnTipoEcf = 47
+    lnExtranjero = 1
+  Endif
+  * Comprador extranjero: usar IdentificadorExtranjero y dejar RNCComprador vacio.
   lcComp = "{" + '"RNCComprador":"' + _JsonEscape(Iif(lnExtranjero = 0, _ChalonaEcfNormalizeTexto(lcMaeRnc), "")) + '",' + ;
     '"IdentificadorExtranjero":"' + _JsonEscape(Iif(lnExtranjero = 0, "", _ChalonaEcfNormalizeTexto(lcMaeRnc))) + '",' + ;
     '"RazonSocialComprador":"' + _JsonEscape(_ChalonaEcfNormalizeTexto(lcMaeNombre)) + '"}'
