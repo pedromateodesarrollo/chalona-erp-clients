@@ -1013,33 +1013,22 @@ Function ChalonaEcfBuildDocJsonFox
     Endif
   Endif
 
-  * TipoeCF 41: totales de retenci�n solo si >0 (DGII 11160 si TotalITBISRetenido=0 informado junto a ISR).
+  * TipoeCF 41: emitir SIEMPRE TotalITBISRetenido y TotalISRRetencion (DGII rechaza 11160 si
+  * IndicadorAgenteRetencionoPercepcion=1 esta presente y los totales se omiten, aunque sean 0).
   If lnTipoEcf = 41 And !llCorrigeTexto
-    lcInsRet = ""
-    If lnItbisRet # 0
-      lcInsRet = lcInsRet + '"TotalITBISRetenido":' + _ChalonaEcfJsonNum(lnItbisRet, 2) + ","
-    Endif
-    If lnIsr # 0
-      lcInsRet = lcInsRet + '"TotalISRRetencion":' + _ChalonaEcfJsonNum(lnIsr, 2) + ","
-    Endif
-    If !Empty(lcInsRet)
-      lnPos = At('"MontoTotal":', lcTot)
-      If lnPos > 0
-        lcTot = Left(lcTot, lnPos - 1) + lcInsRet + Substr(lcTot, lnPos)
-      Endif
+    lcInsRet = '"TotalITBISRetenido":' + _ChalonaEcfJsonNum(lnItbisRet, 2) + "," + ;
+               '"TotalISRRetencion":' + _ChalonaEcfJsonNum(lnIsr, 2) + ","
+    lnPos = At('"MontoTotal":', lcTot)
+    If lnPos > 0
+      lcTot = Left(lcTot, lnPos - 1) + lcInsRet + Substr(lcTot, lnPos)
     Endif
   Endif
 
   lcRetencion41 = ""
   If lnTipoEcf = 41
-    lcRetencion41 = '"Retencion":{"IndicadorAgenteRetencionoPercepcion":1'
-    If lnItbisRet # 0
-      lcRetencion41 = lcRetencion41 + ',"MontoITBISRetenido":' + _ChalonaEcfJsonNum(lnItbisRet, 2)
-    Endif
-    If lnIsr # 0
-      lcRetencion41 = lcRetencion41 + ',"MontoISRRetenido":' + _ChalonaEcfJsonNum(lnIsr, 2)
-    Endif
-    lcRetencion41 = lcRetencion41 + "},"
+    lcRetencion41 = '"Retencion":{"IndicadorAgenteRetencionoPercepcion":1' + ;
+      ',"MontoITBISRetenido":' + _ChalonaEcfJsonNum(lnItbisRet, 2) + ;
+      ',"MontoISRRetenido":' + _ChalonaEcfJsonNum(lnIsr, 2) + "},"
   Endif
 
   * Bloque OtraMoneda (XSD DGII): pareja en moneda extranjera de Totales.
