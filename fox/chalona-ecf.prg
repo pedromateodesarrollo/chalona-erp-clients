@@ -1398,7 +1398,8 @@ Define Class ChalonaEcf As Custom
     * el formulario largo de soporte (el usuario no debe llamar a soporte).
     llDgiiInestable = .F.
     If Vartype(loResp) = "O" And !loResp.ok
-      If Atc('"dgii.conexion_inestable"', Nvl(loResp.rawBody, "")) > 0 ;
+      If Atc('"error_dgii":true', Nvl(loResp.rawBody, "")) > 0 ;
+          Or Atc('"dgii.conexion_inestable"', Nvl(loResp.rawBody, "")) > 0 ;
           Or Atc('dgii.conexion_inestable', Nvl(loResp.message, "")) > 0
         llDgiiInestable = .T.
       Endif
@@ -2312,7 +2313,8 @@ Define Class ChalonaEcf As Custom
     Local llDgiiInestable2
     llDgiiInestable2 = .F.
     If Vartype(loResp) = "O" And !loResp.ok
-      If Atc('"dgii.conexion_inestable"', Nvl(loResp.rawBody, "")) > 0 ;
+      If Atc('"error_dgii":true', Nvl(loResp.rawBody, "")) > 0 ;
+          Or Atc('"dgii.conexion_inestable"', Nvl(loResp.rawBody, "")) > 0 ;
           Or Atc('dgii.conexion_inestable', Nvl(loResp.message, "")) > 0
         llDgiiInestable2 = .T.
       Endif
