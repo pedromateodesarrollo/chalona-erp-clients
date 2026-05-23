@@ -3547,7 +3547,7 @@ Enddefine
 Define Class ChalonaFormDgiiInestable As Form
   Caption    = "Servicio DGII no disponible - Reintente en unos minutos"
   Width      = 620
-  Height     = 360
+  Height     = 380
   AutoCenter = .T.
   BorderStyle = 2
   MaxButton  = .F.
@@ -3559,36 +3559,39 @@ Define Class ChalonaFormDgiiInestable As Form
 
   Procedure Init
     Lparameters tcCuerpo
-    Local lcCuerpo
+    Local lcCuerpo, lnPad, lnGap
     lcCuerpo = Nvl(tcCuerpo, "")
+    lnPad = 24
+    lnGap = 16
 
     This.AddObject("lblBanner", "Label")
     With This.lblBanner
-      .Caption   = "  DGII PRESENTANDO INCONVENIENTES"
+      .Caption   = "DGII PRESENTANDO INCONVENIENTES"
       .Left      = 0
       .Top       = 0
       .Width     = Thisform.Width
-      .Height    = 44
+      .Height    = 48
       .BackColor = Rgb(255, 196, 0)
       .ForeColor = Rgb(64, 32, 0)
       .FontName  = "Segoe UI"
       .FontSize  = 14
       .FontBold  = .T.
-      .Alignment = 0
+      .Alignment = 2
     Endwith
 
     This.AddObject("lblTitulo", "Label")
     With This.lblTitulo
-      .Caption  = "Su comprobante NO fue consumido."
-      .Left     = 16
-      .Top      = 56
-      .Width    = Thisform.Width - 32
-      .Height   = 26
-      .FontName = "Segoe UI"
-      .FontSize = 11
-      .FontBold = .T.
+      .Caption   = "Su comprobante NO fue consumido."
+      .Left      = lnPad
+      .Top       = 48 + lnGap
+      .Width     = Thisform.Width - (lnPad * 2)
+      .Height    = 26
+      .FontName  = "Segoe UI"
+      .FontSize  = 11
+      .FontBold  = .T.
       .ForeColor = Rgb(120, 60, 0)
       .BackStyle = 0
+      .Alignment = 2
     Endwith
 
     This.AddObject("edCuerpo", "EditBox")
@@ -3602,10 +3605,10 @@ Define Class ChalonaFormDgiiInestable As Form
         Chr(13) + Chr(10) + ;
         "Agradecemos su paciencia y le pedimos reintentar el envío " + ;
         "en unos minutos."
-      .Left      = 16
-      .Top       = 88
-      .Width     = Thisform.Width - 32
-      .Height    = 180
+      .Left      = lnPad
+      .Top       = 48 + lnGap + 26 + lnGap
+      .Width     = Thisform.Width - (lnPad * 2)
+      .Height    = 170
       .ReadOnly  = .T.
       .BorderStyle = 0
       .ScrollBars = 0
@@ -3620,10 +3623,10 @@ Define Class ChalonaFormDgiiInestable As Form
     This.AddObject("cmdOk", "ChalonaBtnCerrarDgiiInestable")
     With This.cmdOk
       .Caption  = "Entendido, reintentaré"
-      .Width    = 200
-      .Height   = 34
+      .Width    = 220
+      .Height   = 36
       .Left     = (Thisform.Width - .Width) / 2
-      .Top      = Thisform.Height - 56
+      .Top      = Thisform.Height - .Height - lnPad
       .Default  = .T.
       .Cancel   = .T.
       .FontName = "Segoe UI"
