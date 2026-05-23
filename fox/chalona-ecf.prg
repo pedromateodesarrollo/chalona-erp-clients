@@ -1386,12 +1386,31 @@ Define Class ChalonaEcf As Custom
   * Al fallar Enviar: imtr.respuesta_mensajes (si hay control), MESSAGEBOX breve, form opcional.
   Procedure _EnviarFin
     Lparameters loResp, tcControl
-    Local lcMsg, lcBox
+    Local lcMsg, lcBox, llDgiiInestable
     If Vartype(loResp) = "O" ;
         And !loResp.ok ;
         And !Empty(Nvl(tcControl, ""))
       * Persistir mensaje de error en el documento (imtr o gastos).
       This._DocMarcaErrorEnvio(tcControl, loResp)
+    Endif
+    * Detectar problema generalizado de DGII (código dgii.conexion_inestable):
+    * mostrar ventana destacada distinta del flujo de error normal y NO abrir
+    * el formulario largo de soporte (el usuario no debe llamar a soporte).
+    llDgiiInestable = .F.
+    If Vartype(loResp) = "O" And !loResp.ok
+      If Atc('"dgii.conexion_inestable"', Nvl(loResp.rawBody, "")) > 0 ;
+          Or Atc('dgii.conexion_inestable', Nvl(loResp.message, "")) > 0
+        llDgiiInestable = .T.
+      Endif
+    Endif
+    If llDgiiInestable And !_ChalonaEcfUiSilenciada()
+      lcMsg = Nvl(loResp.message, "")
+      If Empty(lcMsg)
+        lcMsg = "El servicio de la DGII está presentando inconvenientes. " + ;
+                "Su e-NCF NO fue consumido. Por favor reintente en unos minutos."
+      Endif
+      Messagebox(lcMsg, 48 + 4096, "DGII NO DISPONIBLE - Reintente en unos minutos")
+      Return loResp
     Endif
     If Vartype(loResp) = "O" And !loResp.ok And !_ChalonaEcfUiSilenciada()
       lcMsg = _ChalonaEcfMensajeErrorImtr(loResp)
@@ -1404,7 +1423,8 @@ Define Class ChalonaEcf As Custom
     If This.MostrarFormularioError ;
         And Vartype(loResp) = "O" ;
         And !loResp.ok ;
-        And !_ChalonaEcfUiSilenciada()
+        And !_ChalonaEcfUiSilenciada() ;
+        And !llDgiiInestable
       ChalonaMostrarErrorEnvioEcf(loResp, tcControl)
     Endif
     Return loResp
