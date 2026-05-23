@@ -3591,9 +3591,9 @@ Define Class ChalonaFormDgiiInestable As Form
       .BackStyle = 0
     Endwith
 
-    This.AddObject("lblCuerpo", "Label")
-    With This.lblCuerpo
-      .Caption  = ;
+    This.AddObject("edCuerpo", "EditBox")
+    With This.edCuerpo
+      .Value     = ;
         "El servicio de la DGII está presentando inconvenientes en estos " + ;
         "momentos. El e-NCF queda disponible para reenviarse." + Chr(13) + Chr(10) + ;
         Chr(13) + Chr(10) + ;
@@ -3602,15 +3602,19 @@ Define Class ChalonaFormDgiiInestable As Form
         Chr(13) + Chr(10) + ;
         "Agradecemos su paciencia y le pedimos reintentar el envío " + ;
         "en unos minutos."
-      .Left     = 16
-      .Top      = 88
-      .Width    = Thisform.Width - 32
-      .Height   = 180
-      .WordWrap = .T.
-      .FontName = "Segoe UI"
-      .FontSize = 10
+      .Left      = 16
+      .Top       = 88
+      .Width     = Thisform.Width - 32
+      .Height    = 180
+      .ReadOnly  = .T.
+      .BorderStyle = 0
+      .ScrollBars = 0
+      .FontName  = "Segoe UI"
+      .FontSize  = 10
       .ForeColor = Rgb(40, 40, 40)
-      .BackStyle = 0
+      .BackColor = Rgb(255, 248, 220)
+      .DisabledBackColor = Rgb(255, 248, 220)
+      .DisabledForeColor = Rgb(40, 40, 40)
     Endwith
 
     This.AddObject("cmdOk", "ChalonaBtnCerrarDgiiInestable")
