@@ -1404,12 +1404,7 @@ Define Class ChalonaEcf As Custom
       Endif
     Endif
     If llDgiiInestable And !_ChalonaEcfUiSilenciada()
-      lcMsg = Nvl(loResp.message, "")
-      If Empty(lcMsg)
-        lcMsg = "El servicio de la DGII está presentando inconvenientes. " + ;
-                "Su e-NCF NO fue consumido. Por favor reintente en unos minutos."
-      Endif
-      Messagebox(lcMsg, 48 + 4096, "DGII NO DISPONIBLE - Reintente en unos minutos")
+      ChalonaMostrarVentanaDgiiInestable()
       Return loResp
     Endif
     If Vartype(loResp) = "O" And !loResp.ok And !_ChalonaEcfUiSilenciada()
@@ -2310,6 +2305,21 @@ Define Class ChalonaEcf As Custom
         And Empty(Alltrim(Nvl(loResp.requestBody, ""))) ;
         And Not Empty(Nvl(lcSendReq, ""))
       loResp.requestBody = lcSendReq
+    Endif
+
+    * Detectar problema generalizado de DGII (código `dgii.conexion_inestable`):
+    * ventana destacada en lugar del flujo de error normal.
+    Local llDgiiInestable2
+    llDgiiInestable2 = .F.
+    If Vartype(loResp) = "O" And !loResp.ok
+      If Atc('"dgii.conexion_inestable"', Nvl(loResp.rawBody, "")) > 0 ;
+          Or Atc('dgii.conexion_inestable', Nvl(loResp.message, "")) > 0
+        llDgiiInestable2 = .T.
+      Endif
+    Endif
+    If llDgiiInestable2 And !llVersionDesact And !_ChalonaEcfUiSilenciada()
+      ChalonaMostrarVentanaDgiiInestable()
+      Return loResp
     Endif
 
     * UI de error: form con boton copiar + Messagebox breve. Se omite en
@@ -3529,6 +3539,110 @@ Enddefine
 *------------------------------------------------------------
 * Formulario modal con texto legible cuando falla el envio (evita MESSAGEBOX).
 *------------------------------------------------------------
+*------------------------------------------------------------
+* Ventana destacada cuando DGII está inestable (código `dgii.conexion_inestable`).
+* Color amarillo de alerta, título grande, AlwaysOnTop, sin botón "Copiar"
+* (no se debe inducir al usuario a llamar a soporte: el problema es de DGII).
+*------------------------------------------------------------
+Define Class ChalonaFormDgiiInestable As Form
+  Caption    = "Servicio DGII no disponible - Reintente en unos minutos"
+  Width      = 620
+  Height     = 360
+  AutoCenter = .T.
+  BorderStyle = 2
+  MaxButton  = .F.
+  MinButton  = .F.
+  Closable   = .T.
+  WindowType = 1
+  AlwaysOnTop = .T.
+  BackColor  = Rgb(255, 248, 220)
+
+  Procedure Init
+    Lparameters tcCuerpo
+    Local lcCuerpo
+    lcCuerpo = Nvl(tcCuerpo, "")
+
+    This.AddObject("lblBanner", "Label")
+    With This.lblBanner
+      .Caption   = "  DGII PRESENTANDO INCONVENIENTES"
+      .Left      = 0
+      .Top       = 0
+      .Width     = Thisform.Width
+      .Height    = 44
+      .BackColor = Rgb(255, 196, 0)
+      .ForeColor = Rgb(64, 32, 0)
+      .FontName  = "Segoe UI"
+      .FontSize  = 14
+      .FontBold  = .T.
+      .Alignment = 0
+    Endwith
+
+    This.AddObject("lblTitulo", "Label")
+    With This.lblTitulo
+      .Caption  = "Su comprobante NO fue consumido."
+      .Left     = 16
+      .Top      = 56
+      .Width    = Thisform.Width - 32
+      .Height   = 26
+      .FontName = "Segoe UI"
+      .FontSize = 11
+      .FontBold = .T.
+      .ForeColor = Rgb(120, 60, 0)
+      .BackStyle = 0
+    Endwith
+
+    This.AddObject("lblCuerpo", "Label")
+    With This.lblCuerpo
+      .Caption  = ;
+        "El servicio de la DGII está presentando inconvenientes en estos " + ;
+        "momentos. El e-NCF queda disponible para reenviarse." + Chr(13) + Chr(10) + ;
+        Chr(13) + Chr(10) + ;
+        "NUESTRO EQUIPO YA ESTÁ EN COMUNICACIÓN CON LA DGII gestionando " + ;
+        "una solución. No es necesario llamar a soporte por este aviso." + Chr(13) + Chr(10) + ;
+        Chr(13) + Chr(10) + ;
+        "Agradecemos su paciencia y le pedimos reintentar el envío " + ;
+        "en unos minutos."
+      .Left     = 16
+      .Top      = 88
+      .Width    = Thisform.Width - 32
+      .Height   = 180
+      .WordWrap = .T.
+      .FontName = "Segoe UI"
+      .FontSize = 10
+      .ForeColor = Rgb(40, 40, 40)
+      .BackStyle = 0
+    Endwith
+
+    This.AddObject("cmdOk", "ChalonaBtnCerrarDgiiInestable")
+    With This.cmdOk
+      .Caption  = "Entendido, reintentaré"
+      .Width    = 200
+      .Height   = 34
+      .Left     = (Thisform.Width - .Width) / 2
+      .Top      = Thisform.Height - 56
+      .Default  = .T.
+      .Cancel   = .T.
+      .FontName = "Segoe UI"
+      .FontSize = 10
+      .FontBold = .T.
+    Endwith
+
+    This.SetAll("Visible", .T.)
+  Endproc
+Enddefine
+
+Define Class ChalonaBtnCerrarDgiiInestable As CommandButton
+  Procedure Click
+    Thisform.Release
+  Endproc
+Enddefine
+
+Function ChalonaMostrarVentanaDgiiInestable
+  Local loF
+  loF = Createobject("ChalonaFormDgiiInestable")
+  loF.Show(1)
+Endfunc
+
 Define Class ChalonaFormErrorEnvioEcf As Form
   Caption = "Envio de e-CF no completado"
   Width = 580
