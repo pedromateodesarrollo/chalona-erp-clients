@@ -2868,17 +2868,37 @@ Define Class ChalonaEcf As Custom
 
   Function _CargarReferenciaImtr
     Lparameters tcOcontrol
-    Local lcSql, lcRaw, lcRefEncf, ldRefFecha
+    Local lcSql, lcRaw, lcQ, lcRefEncf, ldRefFecha, llFound
     If Vartype(tcOcontrol) # "C"
       tcOcontrol = ""
     Endif
+    lcQ = _ChalonaSqlQuote(Alltrim(tcOcontrol))
     lcRaw = "curChalRefRaw"
+    llFound = .F.
+
+    * 1) Intento en dbo.imtr (ventas / facturas).
     ChalonaEcfUseInIfUsed(lcRaw)
-    lcSql = "SELECT TOP 1 encf, fecha FROM dbo.imtr WHERE control = " + _ChalonaSqlQuote(Alltrim(tcOcontrol))
+    lcSql = "SELECT TOP 1 encf, fecha FROM dbo.imtr WHERE control = " + lcQ
     If !Request(lcSql, lcRaw)
       ChalonaEcfLogError("SQL: imtr (referencia)", tcOcontrol, lcSql)
       Return ""
     Endif
+    If Used(lcRaw) And Reccount(lcRaw) > 0
+      llFound = .T.
+    Endif
+
+    * 2) Si imtr no tiene la fila, buscar en dbo.gastos (tipos 41/43).
+    *    NC/ND pueden referenciar comprobantes de compras emitidos como 41/43,
+    *    cuyo eNCF vive en dbo.gastos.ncf (no dbo.imtr.encf).
+    If !llFound
+      ChalonaEcfUseInIfUsed(lcRaw)
+      lcSql = "SELECT TOP 1 ncf AS encf, fecha FROM dbo.gastos WHERE control = " + lcQ
+      If !Request(lcSql, lcRaw)
+        ChalonaEcfLogError("SQL: gastos (referencia)", tcOcontrol, lcSql)
+        Return ""
+      Endif
+    Endif
+
     If !Used("curChalRef")
       This.CrearCursores()
     Endif
