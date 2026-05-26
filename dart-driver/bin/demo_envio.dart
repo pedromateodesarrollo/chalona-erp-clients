@@ -140,6 +140,7 @@ Future<void> main(List<String> args) async {
 
     final encf = idDoc['eNCF'] as String;
     print('[${i + 1}/${docs.length}] Tipo $tipo  eNCF: $encf');
+    print('  JSON: ${const JsonEncoder.withIndent('  ').convert(doc)}');
     try {
       final r = await client.enviaEcf(rnc: _kRnc, portal: _kPortal, json: doc);
       final estado = r['estado']?.toString() ?? 'ok';
