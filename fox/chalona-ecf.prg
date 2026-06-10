@@ -834,12 +834,27 @@ Function ChalonaEcfBuildDocJsonFox
     lcIndicadorNotaCredito = Iif(lnDiasNcRef > 30, '"IndicadorNotaCredito":1,', '"IndicadorNotaCredito":0,')
   Endif
 
+  * TipoIngresos (DGII 01-06). Default "01" (Ingresos por operaciones). El
+  * integrador puede setear curChalMae.tipoingresos para 02-06; valor invalido
+  * o vacio cae a "01" (nunca se envia un codigo fuera de catalogo).
+  Local lcTipoIngresos, lcTmpTI, lnTmpTI
+  lcTipoIngresos = "01"
+  If Type("curChalMae.tipoingresos") # "U"
+    lcTmpTI = Chrtran(Alltrim(Transform(Nvl(curChalMae.tipoingresos, ""))), " ", "")
+    If !Empty(lcTmpTI) And Isdigit(lcTmpTI)
+      lnTmpTI = Int(Val(lcTmpTI))
+      If Between(lnTmpTI, 1, 6)
+        lcTipoIngresos = Padl(Transform(lnTmpTI), 2, "0")
+      Endif
+    Endif
+  Endif
+
   lcIdDoc = "{" + '"TipoeCF":"' + _JsonEscape(lcTipoeCF) + '",' + ;
     '"eNCF":"' + _JsonEscape(lcEncf) + '",' + ;
     lcIndicadorNotaCredito + ;
     '"FechaVencimientoSecuencia":"' + _JsonEscape(lcFecVen) + '",' + ;
         '"IndicadorMontoGravado":' + Transform(lnIndicadorMontoGravado) + "," + ;
-    '"TipoIngresos":"01",' + ;
+    '"TipoIngresos":"' + lcTipoIngresos + '",' + ;
     '"TipoPago":' + Transform(lnTipoPago) + "," + ;
     '"FechaLimitePago":' + lcFLP + "}"
 
@@ -2149,6 +2164,7 @@ Define Class ChalonaEcf As Custom
        itbisr              N(18,2), ;
        isr                 N(18,2), ;
        propina             N(18,2), ;
+       tipoingresos        C(2), ;
        diascr              N(5,0), ;
        comentario          C(200), ;
        referencia          C(40), ;
