@@ -4250,17 +4250,21 @@ Function _JsonEscape
   lc = Strtran(lc, Chr(13), "\n")
   lc = Strtran(lc, Chr(10), "\n")
   lc = Strtran(lc, Chr(9), "\t")
-  * Eliminar otros chars de control (0x01-0x08, 0x0B, 0x0C, 0x0E-0x1F) que rompen JSON.
-  For i = 1 To 31
+  * Eliminar chars de control (0x00-0x1F y 0x7F) que rompen JSON.
+  * Incluye NUL (Chr(0)) que puede quedar en campos C() de DBF legacy.
+  For i = 0 To 31
     Do Case
       Case i = 9 Or i = 10 Or i = 13
-        * ya manejados
+        * ya manejados arriba
       Otherwise
         If Chr(i) $ lc
           lc = Strtran(lc, Chr(i), "")
         Endif
     Endcase
   Endfor
+  If Chr(127) $ lc
+    lc = Strtran(lc, Chr(127), "")
+  Endif
   Return lc
 Endfunc
 
