@@ -273,6 +273,7 @@ Function ChalonaEcfBuildDocJsonFox
   Local lnTipoEcf, lnBaseGrav, lnIndFact, lnIndFactLin, lnDiasNcRef, lcIndicadorNotaCredito, lnTolerancia, lnItbisEsperado, llDetTieneItbis, lnItbisLineaVal
   Local lnPropina, lnPropinaOM
   Local lnSumGravadoI1, lnSumExento, lnSumItbisI1, lnSumGravadoI3, lnSumTotalDet, lnItbisLin
+  Local lnSumGravadoI2, lnSumItbisI2, lnSumGravadoI2OM, lnSumItbisI2OM
   Local lnSumGravadoI1OM, lnSumExentoOM, lnSumItbisI1OM, lnSumGravadoI3OM
   Local lnGravI1Final, lnItbisI1Final, lnTotalFinal
   * Con IndicadorMontoGravado=1: totales de cabecera alineados a la suma del detalle (ITBIS incluido en lÃ­nea).
@@ -713,11 +714,15 @@ Function ChalonaEcfBuildDocJsonFox
   lnSumExento = 0
   lnSumItbisI1 = 0
   lnSumGravadoI3 = 0
+  lnSumGravadoI2 = 0
+  lnSumItbisI2 = 0
   lnSumTotalDet = 0
   lnSumGravadoI1OM = 0
   lnSumExentoOM = 0
   lnSumItbisI1OM = 0
   lnSumGravadoI3OM = 0
+  lnSumGravadoI2OM = 0
+  lnSumItbisI2OM = 0
   * Default: si curChalDet no esta o ya estamos en corrige_texto, asumir cabecera como criterio (lnItbis).
   llDetTieneItbis = .F.
   If Used("curChalDet") And Reccount("curChalDet") > 0
@@ -740,19 +745,22 @@ Function ChalonaEcfBuildDocJsonFox
       If lnMontoItem = 0
         Loop
       Endif
-      * ITBIS por línea: tomar imtrd.itbis tal cual del ERP (fuente de verdad
-      * para coherencia con NC posteriores). Si la columna no existe, recalcular
-      * sobre el monto neto como fallback.
-      If llDetTieneItbis
-        lnItbisLineaVal = _ChalonaEcfNzNum(itbis)
-        lnItbisLin = Round(lnItbisLineaVal, 2)
-      Else
-        lnItbisLineaVal = Iif(lnItbis > 0, 1, 0)
-        lnItbisLin = Round(lnMontoItem * lnItbis1 / 100, 2)
-      Endif
-      * itbis_tasa por linea (override DGII): >0 fuerza gravado, 0 con itbis=0 => exento.
+      * itbis_tasa por linea (alimentado por imtrd.itasa/itbisporc): 18=>I1, 16=>I2, >0 sin match => I1, 0 con itbis=0 => exento.
       Local lnTasaLin
       lnTasaLin = Iif(Type("itbis_tasa") # "U", _ChalonaEcfNzNum(itbis_tasa), 0)
+      * ITBIS por línea: tomar imtrd.itbis tal cual del ERP (fuente de verdad
+      * para coherencia con NC posteriores). Si la columna no existe, recalcular
+      * sobre el monto neto usando la tasa de la línea (itasa) o la de cabecera.
+      * El ITBIS del ERP está en la moneda del documento; los Totales DGII van en DOP,
+      * así que se multiplica por lnTasaFactor igual que la base (lnP línea 730).
+      * En DOP lnTasaFactor=1 (sin efecto); en multimoneda alinea TotalITBIS con MontoGravado.
+      If llDetTieneItbis
+        lnItbisLineaVal = _ChalonaEcfNzNum(itbis)
+        lnItbisLin = Round(lnItbisLineaVal * lnTasaFactor, 2)
+      Else
+        lnItbisLineaVal = Iif(lnItbis > 0, 1, 0)
+        lnItbisLin = Round(lnMontoItem * Iif(lnTasaLin > 0, lnTasaLin, lnItbis1) / 100, 2)
+      Endif
       lnSumTotalDet = lnSumTotalDet + lnMontoItem
       Do Case
       Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
@@ -764,6 +772,9 @@ Function ChalonaEcfBuildDocJsonFox
           lnSumGravadoI1 = lnSumGravadoI1 + lnMontoItem
           lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
         Endif
+      Case lnTasaLin = 16
+        lnSumGravadoI2 = lnSumGravadoI2 + lnMontoItem
+        lnSumItbisI2 = lnSumItbisI2 + lnItbisLin
       Case lnTasaLin > 0
         lnSumGravadoI1 = lnSumGravadoI1 + lnMontoItem
         lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
@@ -777,7 +788,7 @@ Function ChalonaEcfBuildDocJsonFox
         lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) / lnFactorIprecio * lnC, 2)
         lnDescLinOMloc = Iif(lnDescMaeOM = 0 Or lnTotalBruto = 0, 0, Round(lnDescMaeOM * lnBruto / lnTotalBruto, 2))
         lnMontoItemOMloc = Round(lnBrutoOM - lnDescLinOMloc, 2)
-        lnItbisLinOM = Round(lnMontoItemOMloc * lnItbis1 / 100, 2)
+        lnItbisLinOM = Round(lnMontoItemOMloc * Iif(lnTasaLin > 0, lnTasaLin, lnItbis1) / 100, 2)
         Do Case
         Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
           lnSumExentoOM = lnSumExentoOM + lnMontoItemOMloc
@@ -788,6 +799,9 @@ Function ChalonaEcfBuildDocJsonFox
             lnSumGravadoI1OM = lnSumGravadoI1OM + lnMontoItemOMloc
             lnSumItbisI1OM = lnSumItbisI1OM + lnItbisLinOM
           Endif
+        Case lnTasaLin = 16
+          lnSumGravadoI2OM = lnSumGravadoI2OM + lnMontoItemOMloc
+          lnSumItbisI2OM = lnSumItbisI2OM + lnItbisLinOM
         Case lnItbisLineaVal = 0
           lnSumExentoOM = lnSumExentoOM + lnMontoItemOMloc
         Otherwise
@@ -951,49 +965,34 @@ Function ChalonaEcfBuildDocJsonFox
     Endif
     * Totales desde detalle (acumuladores por IndicadorFacturacion). Si el SCAN no acumuló nada
     * (sin detalle), caer al cálculo legacy desde maestro.
-    If lnSumGravadoI1 + lnSumExento > 0
+    If lnSumGravadoI1 + lnSumGravadoI2 + lnSumExento > 0
       * Con IndicadorMontoGravado=1 el MontoItem viene con ITBIS incluido: hay que removerlo
       * para MontoGravadoI1 y derivar TotalITBIS1 = base con ITBIS - base sin ITBIS.
       lnGravI1Final = lnSumGravadoI1
       lnItbisI1Final = lnSumItbisI1
-      lnTotalFinal = Round(lnSumGravadoI1 + lnSumExento + lnSumItbisI1 + lnPropina, 2)
+      lnTotalFinal = Round(lnSumGravadoI1 + lnSumGravadoI2 + lnSumExento + lnSumItbisI1 + lnSumItbisI2 + lnPropina, 2)
       If lnIndicadorMontoGravado = 1 And lnItbis1 > 0 And lnSumGravadoI1 > 0
         lnFactorItbis = 1 + (lnItbis1 / 100)
         lnGravI1Final = Round(lnSumGravadoI1 / lnFactorItbis, 2)
         lnItbisI1Final = Round(lnSumGravadoI1 - lnGravI1Final, 2)
-        lnTotalFinal = Round(lnSumGravadoI1 + lnSumExento + lnPropina, 2)
+        lnTotalFinal = Round(lnSumGravadoI1 + lnSumGravadoI2 + lnSumExento + lnSumItbisI2 + lnPropina, 2)
       Endif
-      * Blindaje DGII 11014: con IndicadorMontoGravado=0 y tasa>0, TotalITBIS1 debe
-      * cumplir base*tasa/100. Si imtrd.itbis del ERP es incoherente (sumatoria
-      * lnSumItbisI1 diverge mas de 0.05 del esperado), forzar recalculo desde la
-      * base para evitar rechazo DGII (caso RNC 101005165, ITBIS=999.70 vs 63267.54).
-      If lnIndicadorMontoGravado = 0 And lnItbis1 > 0 And lnGravI1Final > 0
-        lnItbisEsperado = Round(lnGravI1Final * lnItbis1 / 100, 2)
-        If Abs(lnItbisEsperado - lnItbisI1Final) > 0.05
-          ChalonaEcfLogError("ECF ITBIS detalle incoherente: ERP envio TotalITBIS1=" + Transform(lnItbisI1Final) + " pero base " + Transform(lnGravI1Final) + " x " + Transform(lnItbis1) + "% = " + Transform(lnItbisEsperado) + ". Recalculando desde la base (DGII 11014).", tcControl, "")
-          lnItbisI1Final = lnItbisEsperado
-          lnTotalFinal = Round(lnGravI1Final + lnSumExento + lnItbisI1Final + lnPropina, 2)
-        Endif
-      Endif
+      * Sin recalculo: el ITBIS crudo del ERP se envia tal cual (I1 18% y, si hay itasa=16, I2 16%).
+      * Si supera base*tasa/100, el validador del API lo rechaza (no se enmascara).
       lcTot = "{" + ;
-        '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnGravI1Final, 2) + "," + ;
+        '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnGravI1Final + lnSumGravadoI2, 2) + "," + ;
         '"MontoGravadoI1":' + _ChalonaEcfJsonNum(lnGravI1Final, 2) + "," + ;
+        Iif(lnSumGravadoI2 > 0, '"MontoGravadoI2":' + _ChalonaEcfJsonNum(lnSumGravadoI2, 2) + ",", "") + ;
         Iif(lnSumExento > 0, '"MontoExento":' + _ChalonaEcfJsonNum(lnSumExento, 2) + ",", "") + ;
-        '"TotalITBIS":' + _ChalonaEcfJsonNum(lnItbisI1Final, 2) + "," + ;
+        '"TotalITBIS":' + _ChalonaEcfJsonNum(lnItbisI1Final + lnSumItbisI2, 2) + "," + ;
         '"ITBIS1":' + Transform(lnItbis1) + "," + ;
+        Iif(lnSumGravadoI2 > 0, '"ITBIS2":16,', "") + ;
         '"TotalITBIS1":' + _ChalonaEcfJsonNum(lnItbisI1Final, 2) + "," + ;
+        Iif(lnSumGravadoI2 > 0, '"TotalITBIS2":' + _ChalonaEcfJsonNum(lnSumItbisI2, 2) + ",", "") + ;
         '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotalFinal, 2) + "}"
     Else
-      * Mismo blindaje en rama fallback (sin detalle): si imtr.itbis no cuadra
-      * con base*tasa/100, recalcular antes de armar el JSON.
-      If lnIndicadorMontoGravado = 0 And lnItbis1 > 0 And lnBaseGrav > 0
-        lnItbisEsperado = Round(lnBaseGrav * lnItbis1 / 100, 2)
-        If Abs(lnItbisEsperado - lnItbis) > 0.05
-          ChalonaEcfLogError("ECF ITBIS maestro incoherente: imtr.itbis=" + Transform(lnItbis) + " pero base " + Transform(lnBaseGrav) + " x " + Transform(lnItbis1) + "% = " + Transform(lnItbisEsperado) + ". Recalculando (DGII 11014).", tcControl, "")
-          lnItbis = lnItbisEsperado
-          lnTotal = Round(lnBaseGrav + lnItbis + lnPropina, 2)
-        Endif
-      Endif
+      * Sin recalculo (rama fallback sin detalle): imtr.itbis se envia tal cual.
+      * Si no cuadra con base*tasa/100, el validador del API lo rechaza.
       lcTot = "{" + ;
         '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
         '"MontoGravadoI1":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
@@ -1067,13 +1066,19 @@ Function ChalonaEcfBuildDocJsonFox
         '"MontoTotalOtraMoneda":' + _ChalonaEcfJsonNum(lnTotalO, 2) + ;
         "}"
     Otherwise
+      * Ventas con ITBIS: segmentar gravado vs exento en OtraMoneda usando los
+      * acumuladores OM por línea (igual que Totales DOP). Si se manda todo como
+      * gravado y se omite MontoExentoOtraMoneda con exento>0, DGII rechaza 11260.
       lcOtraMoneda = '"OtraMoneda":{' + ;
         '"TipoMoneda":"' + _JsonEscape(lcMoneda) + '",' + ;
         '"TipoCambio":' + _ChalonaEcfJsonNum(lnTasaFactor, 4) + "," + ;
-        '"MontoGravadoTotalOtraMoneda":' + _ChalonaEcfJsonNum(lnBaseGravO, 2) + "," + ;
-        '"MontoGravado1OtraMoneda":' + _ChalonaEcfJsonNum(lnBaseGravO, 2) + "," + ;
-        '"TotalITBISOtraMoneda":' + _ChalonaEcfJsonNum(lnItbisO, 2) + "," + ;
-        '"TotalITBIS1OtraMoneda":' + _ChalonaEcfJsonNum(lnItbisO, 2) + "," + ;
+        '"MontoGravadoTotalOtraMoneda":' + _ChalonaEcfJsonNum(lnSumGravadoI1OM + lnSumGravadoI2OM, 2) + "," + ;
+        '"MontoGravado1OtraMoneda":' + _ChalonaEcfJsonNum(lnSumGravadoI1OM, 2) + "," + ;
+        Iif(lnSumGravadoI2OM > 0, '"MontoGravado2OtraMoneda":' + _ChalonaEcfJsonNum(lnSumGravadoI2OM, 2) + ",", "") + ;
+        Iif(lnSumExentoOM > 0, '"MontoExentoOtraMoneda":' + _ChalonaEcfJsonNum(lnSumExentoOM, 2) + ",", "") + ;
+        '"TotalITBISOtraMoneda":' + _ChalonaEcfJsonNum(lnSumItbisI1OM + lnSumItbisI2OM, 2) + "," + ;
+        '"TotalITBIS1OtraMoneda":' + _ChalonaEcfJsonNum(lnSumItbisI1OM, 2) + "," + ;
+        Iif(lnSumGravadoI2OM > 0, '"TotalITBIS2OtraMoneda":' + _ChalonaEcfJsonNum(lnSumItbisI2OM, 2) + ",", "") + ;
         '"MontoTotalOtraMoneda":' + _ChalonaEcfJsonNum(lnTotalO, 2) + ;
         "}"
     Endcase
@@ -2721,9 +2726,10 @@ Define Class ChalonaEcf As Custom
       lcMercsNombre   = Iif(Type("mercs_nombre") # "U", Alltrim(Transform(Nvl(mercs_nombre, ""))), "")
       lnMercsServicio = Iif(Type("mercs_servicio") # "U", _ChalonaEcfNzNum(mercs_servicio), 0)
       lnItbisLin      = Iif(Type("itbis") # "U", _ChalonaEcfNzNum(itbis), 0)
-      * itbisporc en imtrd o itbis_tasa en otros esquemas; 0 si ninguno.
+      * Tasa ITBIS por linea: itasa (canon imtrd), itbis_tasa o itbisporc; 0 si ninguno.
       lnItbisTasa     = Iif(Type("itbis_tasa") # "U", _ChalonaEcfNzNum(itbis_tasa), ;
-                             Iif(Type("itbisporc") # "U", _ChalonaEcfNzNum(itbisporc), 0))
+                             Iif(Type("itasa") # "U", _ChalonaEcfNzNum(itasa), ;
+                             Iif(Type("itbisporc") # "U", _ChalonaEcfNzNum(itbisporc), 0)))
       lnItbisRet      = Iif(Type("itbis_retenido") # "U", _ChalonaEcfNzNum(itbis_retenido), 0)
       lnIsrRet        = Iif(Type("isr_retenido") # "U", _ChalonaEcfNzNum(isr_retenido), 0)
       Insert Into curChalDet ;
