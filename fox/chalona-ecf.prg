@@ -837,7 +837,7 @@ Function ChalonaEcfBuildDocJsonFox
   * TipoIngresos (DGII 01-06). Default "01" (Ingresos por operaciones). El
   * integrador puede setear curChalMae.tipoingresos para 02-06; valor invalido
   * o vacio cae a "01" (nunca se envia un codigo fuera de catalogo).
-  Local lcTipoIngresos, lcTmpTI, lnTmpTI
+  Local lcTipoIngresos, lcTmpTI, lnTmpTI, lcTipoIngFrag
   lcTipoIngresos = "01"
   If Type("curChalMae.tipoingresos") # "U"
     lcTmpTI = Chrtran(Alltrim(Transform(Nvl(curChalMae.tipoingresos, ""))), " ", "")
@@ -849,12 +849,20 @@ Function ChalonaEcfBuildDocJsonFox
     Endif
   Endif
 
+  * Nota 33/34 que modifica una Compras (E41): omitir TipoIngresos. No aplica a
+  * compras (obligatoriedad DGII 41=0); enviarlo genera observacion condicional
+  * "El campo TipoIngresos ... no es valido". lcRefEncf = NCF referenciado.
+  lcTipoIngFrag = '"TipoIngresos":"' + lcTipoIngresos + '",'
+  If (lcTipoeCF == "33" Or lcTipoeCF == "34") And Left(Alltrim(lcRefEncf), 3) == "E41"
+    lcTipoIngFrag = ""
+  Endif
+
   lcIdDoc = "{" + '"TipoeCF":"' + _JsonEscape(lcTipoeCF) + '",' + ;
     '"eNCF":"' + _JsonEscape(lcEncf) + '",' + ;
     lcIndicadorNotaCredito + ;
     '"FechaVencimientoSecuencia":"' + _JsonEscape(lcFecVen) + '",' + ;
         '"IndicadorMontoGravado":' + Transform(lnIndicadorMontoGravado) + "," + ;
-    '"TipoIngresos":"' + lcTipoIngresos + '",' + ;
+    lcTipoIngFrag + ;
     '"TipoPago":' + Transform(lnTipoPago) + "," + ;
     '"FechaLimitePago":' + lcFLP + "}"
 
