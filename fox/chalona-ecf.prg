@@ -326,15 +326,15 @@ Function ChalonaEcfBuildDocJsonFox
       Endif
       Select curChalMae
       Go Top
-      * Origen: derivado del fiscal (41/43 = gastos).
-      llEsGastos = Inlist(Int(Val(Alltrim(Transform(Nvl(fiscal, ""))))), 41, 43)
+      * Origen: derivado del fiscal (41/43/47 = gastos/compras; 47 = Pagos al Exterior).
+      llEsGastos = Inlist(Int(Val(Alltrim(Transform(Nvl(fiscal, ""))))), 41, 43, 47)
 
   Select curChalMae
   Go Top
   lcTipoeCF = Alltrim(Transform(fiscal))
-  * Compras (gastos): solo se permiten tipos 41 y 43.
-  If llEsGastos And !Inlist(Int(Val(lcTipoeCF)), 41, 43)
-    ChalonaEcfLogError("ECF: gastos solo permite TipoeCF 41/43 (viene " + lcTipoeCF + ")", tcControl, "")
+  * Compras (gastos): solo se permiten tipos 41, 43 y 47 (Pagos al Exterior).
+  If llEsGastos And !Inlist(Int(Val(lcTipoeCF)), 41, 43, 47)
+    ChalonaEcfLogError("ECF: gastos solo permite TipoeCF 41/43/47 (viene " + lcTipoeCF + ")", tcControl, "")
     gcChalonaEcfBuildDocError = "ecf.gastos.tipo_no_permitido"
     llNull = .T.
     Exit
