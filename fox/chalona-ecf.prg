@@ -1035,9 +1035,10 @@ Function ChalonaEcfBuildDocJsonFox
     Endif
   Endif
 
-  * TipoeCF 41: emitir SIEMPRE TotalITBISRetenido y TotalISRRetencion (DGII rechaza 11160 si
+  * TipoeCF 41 y 47: emitir SIEMPRE TotalITBISRetenido y TotalISRRetencion (DGII rechaza 11160 si
   * IndicadorAgenteRetencionoPercepcion=1 esta presente y los totales se omiten, aunque sean 0).
-  If lnTipoEcf = 41 And !llCorrigeTexto
+  * 47 (Pagos al Exterior) tambien es agente de retencion (ISR sobre pago al exterior).
+  If Inlist(lnTipoEcf, 41, 47) And !llCorrigeTexto
     lcInsRet = '"TotalITBISRetenido":' + _ChalonaEcfJsonNum(lnItbisRet, 2) + "," + ;
                '"TotalISRRetencion":' + _ChalonaEcfJsonNum(lnIsr, 2) + ","
     lnPos = At('"MontoTotal":', lcTot)
@@ -1046,8 +1047,10 @@ Function ChalonaEcfBuildDocJsonFox
     Endif
   Endif
 
+  * Retencion por item (XSD DGII obligatoria en 41 y 47). IndicadorAgente=1 (Retencion):
+  * en 47 (Pagos al Exterior) el emisor retiene ISR sobre el pago al exterior.
   lcRetencion41 = ""
-  If lnTipoEcf = 41
+  If Inlist(lnTipoEcf, 41, 47)
     lcRetencion41 = '"Retencion":{"IndicadorAgenteRetencionoPercepcion":1' + ;
       ',"MontoITBISRetenido":' + _ChalonaEcfJsonNum(lnItbisRet, 2) + ;
       ',"MontoISRRetenido":' + _ChalonaEcfJsonNum(lnIsr, 2) + "},"
