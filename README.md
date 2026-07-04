@@ -57,6 +57,7 @@ data.
 | [`python-driver/`](python-driver/) | Cliente Python — `.py` source via `exec()` en namespace aislado, stdlib only |
 | [`sql/`](sql/) | Schema Postgres standalone (tablas + funciones) |
 | [`docs/`](docs/) | Arquitectura, quickstarts, limitaciones |
+| [`docs/protocolo-http.md`](docs/protocolo-http.md) | **Sin cliente** — contrato HTTP crudo para integrar en cualquier lenguaje |
 
 ## Cómo empezar
 
@@ -102,6 +103,7 @@ motor lo publica Chalona. Solo necesitás credenciales de acceso al server.
 | TypeScript | Postgres directo | [typescript-quickstart.md](docs/typescript-quickstart.md) |
 | Node.js (puro JS) | Postgres directo | [nodejs-quickstart.md](docs/nodejs-quickstart.md) |
 | Python | Postgres directo | [python-quickstart.md](docs/python-quickstart.md) |
+| **Cualquier otro** (Go, Java, PHP, Rust…) | HTTP crudo a server-ecf | [protocolo-http.md](docs/protocolo-http.md) |
 
 Cada quickstart incluye al final una sección "Self-hosting (avanzado)"
 para quien quiera correr su propio motor (forkear el patrón). Caso
