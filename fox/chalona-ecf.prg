@@ -180,6 +180,16 @@ Function _ChalonaEcfFactorStripLinea
   * GRAVADAS; una linea exenta conserva su monto (factor 1). Evita que en una
   * factura mixta (gravado + exento) el monto exento se reduzca por 1.18.
   * Requiere estar posicionado en la fila de curChalDet (se llama dentro del Scan).
+  * Caso especial noaplicai=1: producto GRAVADO con ITBIS suprimido (p.ej. NC >30
+  * dias que por norma DGII no puede reducir ITBIS). El precio sigue siendo gross
+  * (con ITBIS) aunque la linea traiga itbis=0; hay que quitarlo para enviar la base.
+  * Distinto de un producto exento real (noaplicai=0), cuyo precio ya es neto.
+  * Asume tasa 18% (igual que el strip estandar del builder).
+  Local lnNoAplicaI
+  lnNoAplicaI = Iif(Type("noaplicai") # "U", _ChalonaEcfNzNum(noaplicai), 0)
+  If tnIprecio = 1 And lnNoAplicaI = 1
+    Return 1.18
+  Endif
   Local lnTasaL, llExenta
   lnTasaL = Iif(Type("itbis_tasa") # "U", _ChalonaEcfNzNum(itbis_tasa), 0)
   Do Case
@@ -2206,7 +2216,8 @@ Define Class ChalonaEcf As Custom
        itbis          N(18,2), ;
        itbis_tasa     N(5,2), ;
        itbis_retenido N(18,2), ;
-       isr_retenido   N(18,2))
+       isr_retenido   N(18,2), ;
+       noaplicai      N(1))
 
     ChalonaEcfUseInIfUsed("curChalEmp")
     Create Cursor curChalEmp ;
@@ -2734,7 +2745,7 @@ Define Class ChalonaEcf As Custom
     Zap
 
     Local lnPrecio, lnCantidad, lcDescrip, lcMercsNombre, lnMercsServicio
-    Local lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet
+    Local lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet, lnNoAplicaI
     Select (lcRaw)
     Scan
       lnPrecio        = Iif(Type("precio") # "U", _ChalonaEcfNzNum(precio), 0)
@@ -2749,9 +2760,12 @@ Define Class ChalonaEcf As Custom
                              Iif(Type("itbisporc") # "U", _ChalonaEcfNzNum(itbisporc), 0)))
       lnItbisRet      = Iif(Type("itbis_retenido") # "U", _ChalonaEcfNzNum(itbis_retenido), 0)
       lnIsrRet        = Iif(Type("isr_retenido") # "U", _ChalonaEcfNzNum(isr_retenido), 0)
+      * noaplicai: flag "no aplica ITBIS" (producto gravado con ITBIS suprimido, p.ej.
+      * NC >30 dias sin ITBIS). El precio sigue siendo gross; se strippea en el builder.
+      lnNoAplicaI     = Iif(Type("noaplicai") # "U", _ChalonaEcfNzNum(noaplicai), 0)
       Insert Into curChalDet ;
-        (precio, cantidad, descrip, mercs_nombre, mercs_servicio, itbis, itbis_tasa, itbis_retenido, isr_retenido) ;
-        Values (lnPrecio, lnCantidad, Left(lcDescrip, 200), Left(lcMercsNombre, 200), lnMercsServicio, lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet)
+        (precio, cantidad, descrip, mercs_nombre, mercs_servicio, itbis, itbis_tasa, itbis_retenido, isr_retenido, noaplicai) ;
+        Values (lnPrecio, lnCantidad, Left(lcDescrip, 200), Left(lcMercsNombre, 200), lnMercsServicio, lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet, lnNoAplicaI)
     Endscan
 
     ChalonaEcfUseInIfUsed(lcRaw)
