@@ -173,6 +173,26 @@ Function _ChalonaEcfNzNum
   Endcase
 Endfunc
 
+Function _ChalonaEcfFactorStripLinea
+  Lparameters tnIprecio, tnItbis1, tnItbisCab, tlDetTieneItbis
+  * Factor por el que se divide el PRECIO de LINEA para quitar el ITBIS incluido
+  * cuando el ERP entrega precios con ITBIS (iprecio=1). Solo aplica a lineas
+  * GRAVADAS; una linea exenta conserva su monto (factor 1). Evita que en una
+  * factura mixta (gravado + exento) el monto exento se reduzca por 1.18.
+  * Requiere estar posicionado en la fila de curChalDet (se llama dentro del Scan).
+  Local lnTasaL, llExenta
+  lnTasaL = Iif(Type("itbis_tasa") # "U", _ChalonaEcfNzNum(itbis_tasa), 0)
+  Do Case
+  Case lnTasaL > 0
+    llExenta = .F.
+  Case tlDetTieneItbis
+    llExenta = (_ChalonaEcfNzNum(itbis) = 0)
+  Otherwise
+    llExenta = (tnItbisCab = 0)
+  Endcase
+  Return Iif(tnIprecio = 1 And tnItbis1 > 0 And !llExenta, 1 + tnItbis1 / 100, 1)
+Endfunc
+
 Function _ChalonaEcfFmtDdMmYy
   Lparameters td
   Local ld
@@ -624,16 +644,6 @@ Function ChalonaEcfBuildDocJsonFox
   Endif
   * (Ventas: curChalDet debe estar pre-poblado por _PoblarCursoresDesdeImtr o por el integrador.)
 
-  lnTotalBruto = 0
-  If Used("curChalDet") And Reccount("curChalDet") > 0
-    Select curChalDet
-    Scan
-      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / Iif(lnIprecio=1 And lnItbis#0, 1.18, 1), 6)
-      lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
-      lnTotalBruto = lnTotalBruto + Round(lnP * lnC, 2)
-    Endscan
-  Endif
-
   * ITBIS tasa en cabecera / IndicadorFacturacion (antes de IdDoc: hace falta para armar Totales y detalle).
   If lnItbis = 0
     lnItbis1 = 0
@@ -641,6 +651,23 @@ Function ChalonaEcfBuildDocJsonFox
     lnItbis1 = 18
   Endif
   lnFactorIprecio = Iif(lnIprecio = 1 And lnItbis1 > 0, 1 + lnItbis1 / 100, 1)
+  * Detectar si el detalle trae ITBIS por linea (columna itbis). Se usa para
+  * decidir, linea por linea, si se le quita el ITBIS incluido (solo gravadas).
+  llDetTieneItbis = .F.
+  If Used("curChalDet") And Reccount("curChalDet") > 0
+    Select curChalDet
+    llDetTieneItbis = (Type("itbis") != "U")
+  Endif
+
+  lnTotalBruto = 0
+  If Used("curChalDet") And Reccount("curChalDet") > 0
+    Select curChalDet
+    Scan
+      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis), 6)
+      lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
+      lnTotalBruto = lnTotalBruto + Round(lnP * lnC, 2)
+    Endscan
+  Endif
   lnTipoEcf = Val(lcTipoeCF)
   lnBaseGrav = lnValor - lnDescMae
   Do Case
@@ -723,16 +750,11 @@ Function ChalonaEcfBuildDocJsonFox
   lnSumGravadoI3OM = 0
   lnSumGravadoI2OM = 0
   lnSumItbisI2OM = 0
-  * Default: si curChalDet no esta o ya estamos en corrige_texto, asumir cabecera como criterio (lnItbis).
-  llDetTieneItbis = .F.
-  If Used("curChalDet") And Reccount("curChalDet") > 0
-    Select curChalDet
-    llDetTieneItbis = (Type("itbis") != "U")
-  Endif
+  * (llDetTieneItbis ya calculado arriba, antes del scan de lnTotalBruto.)
   If !llCorrigeTexto And Used("curChalDet") And Reccount("curChalDet") > 0
     Select curChalDet
     Scan
-      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / lnFactorIprecio, 6)
+      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis), 6)
       lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
       lnBruto = Round(lnP * lnC, 2)
       lnDescLin = 0
@@ -785,7 +807,7 @@ Function ChalonaEcfBuildDocJsonFox
         lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
       Endcase
       If llMultiMoneda
-        lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) / lnFactorIprecio * lnC, 2)
+        lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis) * lnC, 2)
         lnDescLinOMloc = Iif(lnDescMaeOM = 0 Or lnTotalBruto = 0, 0, Round(lnDescMaeOM * lnBruto / lnTotalBruto, 2))
         lnMontoItemOMloc = Round(lnBrutoOM - lnDescLinOMloc, 2)
         lnItbisLinOM = Round(lnMontoItemOMloc * Iif(lnTasaLin > 0, lnTasaLin, lnItbis1) / 100, 2)
@@ -1169,7 +1191,7 @@ Function ChalonaEcfBuildDocJsonFox
     If Used("curChalDet") And Reccount("curChalDet") > 0
       Select curChalDet
       Scan
-        lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / lnFactorIprecio, 6)
+        lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis), 6)
         lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
         lnBruto = Round(lnP * lnC, 2)
         lnDescLin = 0
