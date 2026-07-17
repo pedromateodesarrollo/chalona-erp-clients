@@ -51,8 +51,26 @@ Function chalonaEnviaEcf
     If _ChalonaLoaderDescargar()
       loResp = goChalonaEcf.Enviar(tcControl)
     Endif
+    If _ChalonaLoaderEsVersionDesact(loResp)
+      _ChalonaLoaderAvisoVersion()
+    Endif
   Endif
   Return loResp
+Endfunc
+
+* Aviso claro cuando la actualizacion automatica del motor no resolvio el
+* problema de version (descarga fallida o el servidor sigue rechazando).
+Function _ChalonaLoaderAvisoVersion
+  Local lcDetalle
+  lcDetalle = ""
+  If Type("gcChalonaLoaderError") = "C" And !Empty(Nvl(gcChalonaLoaderError, ""))
+    lcDetalle = Chr(13)+Chr(10)+Chr(13)+Chr(10) + "Detalle: " + gcChalonaLoaderError
+  Endif
+  Messagebox("La programacion del cliente ECF esta desactualizada y no pudo " + ;
+    "actualizarse automaticamente." + Chr(13)+Chr(10) + ;
+    "CIERRE y vuelva a ABRIR el sistema para tomar la version nueva." + Chr(13)+Chr(10) + ;
+    "Si el problema persiste, contacte a Chalona." + lcDetalle, ;
+    48, "Chalona ECF - Actualizacion requerida")
 Endfunc
 
 * chalonaSincronizaEstados() -> ChalonaResponse
@@ -65,6 +83,9 @@ Function chalonaSincronizaEstados
   If _ChalonaLoaderEsVersionDesact(loResp)
     If _ChalonaLoaderDescargar()
       loResp = goChalonaEcf.SincronizarEstadosEnProceso()
+    Endif
+    If _ChalonaLoaderEsVersionDesact(loResp)
+      _ChalonaLoaderAvisoVersion()
     Endif
   Endif
   Return loResp

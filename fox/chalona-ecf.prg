@@ -1568,12 +1568,23 @@ Define Class ChalonaEcf As Custom
 
         * Si es version_desactualizada, marcar y salir: el loader hace retry transparente
         * (no Return dentro de TRY: VFP error 2060). Se salta _EnviarFin afuera del Try.
+        * Solo la PRIMERA vez por control: si el mismo control repite el error, el retry
+        * del loader ya fallo (o el loader instalado no reintenta) y hay que avisar claro.
         If PemStatus(loOut, "ok", 5) And !loOut.ok ;
             And Atc('"fox_cliente.version_desactualizada"', Nvl(loOut.rawBody, "")) > 0
-          llVersionDesact = .T.
+          Public gcChalonaEcfVerDesactCtrl
+          If Type("gcChalonaEcfVerDesactCtrl") # "C"
+            gcChalonaEcfVerDesactCtrl = ""
+          Endif
+          If !(Alltrim(gcChalonaEcfVerDesactCtrl) == Alltrim(tcControl))
+            gcChalonaEcfVerDesactCtrl = Alltrim(tcControl)
+            llVersionDesact = .T.
+          Endif
           loResp = loOut
           Exit
         Endif
+        Public gcChalonaEcfVerDesactCtrl
+        gcChalonaEcfVerDesactCtrl = ""
 
         If PemStatus(loOut, "ok", 5) And !loOut.ok
           ChalonaEcfLogError("HTTP: envia_ecf ok=.F.", tcControl, lcBaseUrl + "envia_ecf")
@@ -2127,8 +2138,14 @@ Define Class ChalonaEcf As Custom
   Procedure _HttpPostJson
     Lparameters tcUrl, tcBody, tcToken
     Local loHttp, lcResp, lcT, lcBody, lnLastBrace
-    * Inyectar fox_version + fox_entorno cuando el loader los tiene (validacion de version)
+    * Inyectar cliente_tipo (identidad del remitente: este motor SIEMPRE es Fox)
+    * + fox_version/fox_entorno cuando el loader los tiene (validacion de version).
     lcBody = Nvl(tcBody, "")
+    lnLastBrace = Rat("}", lcBody)
+    If lnLastBrace > 0 And Atc('"cliente_tipo"', lcBody) = 0
+      lcBody = Left(lcBody, lnLastBrace - 1) + ;
+        ',"cliente_tipo":"fox"}'
+    Endif
     If Type("gcChalonaFoxVersion") = "N" And gcChalonaFoxVersion > 0 ;
         And Type("gcChalonaFoxEntorno") = "C"
       lnLastBrace = Rat("}", lcBody)
@@ -3685,6 +3702,16 @@ Function _ChalonaEcfMensajeErrorImtr
   Local lc, loData, lcExtra
   If Vartype(loResp) # "O"
     Return _ChalonaImtrAcotarRespuestaMensajes("Sin respuesta valida")
+  Endif
+  * version_desactualizada -> instruccion clara al usuario del ERP (el codigo
+  * crudo solo le sirve al loader para el retry automatico; si llego hasta aqui
+  * el retry fallo o el loader instalado no reintenta).
+  If (Pemstatus(loResp, "message", 5) ;
+      And Alltrim(Transform(Nvl(loResp.message, ""))) == "fox_cliente.version_desactualizada") ;
+      Or (Pemstatus(loResp, "rawBody", 5) ;
+      And Atc('"fox_cliente.version_desactualizada"', Nvl(loResp.rawBody, "")) > 0)
+    Return _ChalonaImtrAcotarRespuestaMensajes( ;
+      "Cliente ECF desactualizado: CIERRE y vuelva a ABRIR el sistema para tomar la version nueva. Si persiste, contacte a Chalona.")
   Endif
   lc = ""
   If Pemstatus(loResp, "message", 5)
