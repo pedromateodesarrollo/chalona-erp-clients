@@ -1020,10 +1020,55 @@ ejemplo concreto.</p>
 <tr><td><code>ecf.gastos.tipo_no_permitido</code></td><td>Gastos solo permite 41 y 43.</td></tr>
 <tr><td><code>fox_cliente.version_desactualizada</code></td>
     <td>Backend rechaza esta versión del cliente. El loader hace retry transparente
-        descargando la versión activa.</td></tr>
+        descargando la versión activa. <strong>Si el código llega a tu ERP</strong>
+        (loResp.ok=.F. con este message), el retry automático NO resolvió — ver
+        recuadro abajo.</td></tr>
 <tr><td><code>error.no_manejado</code></td>
     <td>Excepción VFP no atrapada. Hay log en <code>ChalonaEcfLogException</code>.</td></tr>
 </table>
+
+<h3 id="version-desact">Manejo de <code>version_desactualizada</code> (obligatorio)</h3>
+
+<p>El servidor rechaza los envíos cuando la programación del cliente Fox no es la
+versión activa (o no reporta versión, típico de motores viejos en caché). El flujo
+esperado es:</p>
+
+<ol class="tight">
+  <li><strong>Automático</strong>: el loader detecta el código, redescarga la
+      versión activa, la instancia en memoria y <em>reintenta el mismo envío</em>.
+      Tu ERP no ve nada — <code>loResp.ok</code> vuelve <code>.T.</code>.</li>
+  <li><strong>Si el retry no resuelve</strong> (loader viejo sin retry, descarga
+      fallida, o el servidor sigue rechazando): <code>loResp.ok=.F.</code> con
+      <code>loResp.message = "fox_cliente.version_desactualizada"</code>. En ese
+      caso el motor v47+ ya devuelve un texto claro en
+      <code>respuesta_mensajes</code> / messagebox: <em>"Cliente ECF
+      desactualizado: CIERRE y vuelva a ABRIR el sistema…"</em>.</li>
+</ol>
+
+<p><strong>Tu ERP debe detectar este código y guiar al usuario a reiniciar</strong>
+(cerrar y reabrir la aplicación fuerza la descarga del motor nuevo desde el
+arranque). Patrón recomendado:</p>
+
+<pre><code>loResp = chalonaEnviaEcf(lcControl)
+<span class="kw">IF</span> !loResp.ok
+   <span class="kw">IF</span> ATC(<span class="str">"fox_cliente.version_desactualizada"</span>, loResp.message + loResp.rawBody) &gt; 0
+      <span class="com">* Version vieja y el auto-update no resolvio. Pedir reinicio.</span>
+      MESSAGEBOX( ;
+        <span class="str">"El modulo de facturacion electronica se actualizo."</span> + CHR(13) + ;
+        <span class="str">"Por favor CIERRE y vuelva a ABRIR el sistema para continuar."</span>, ;
+        48, <span class="str">"Actualizacion requerida"</span>)
+      <span class="com">* No reintentar en loop: el motor nuevo solo carga al reabrir.</span>
+   <span class="kw">ELSE</span>
+      <span class="com">* Otros errores: mostrar loResp.message normalmente.</span>
+      MESSAGEBOX(loResp.message, 16, <span class="str">"Error al enviar e-CF"</span>)
+   <span class="kw">ENDIF</span>
+<span class="kw">ENDIF</span></code></pre>
+
+<p class="tip"><strong>Nota:</strong> reintentar el mismo <code>chalonaEnviaEcf</code>
+en bucle NO ayuda dentro de la misma corrida: el motor cacheado (<code>goChalonaEcf</code>)
+solo se reemplaza al reabrir el sistema o cuando el loader logra la redescarga. Si
+tu loader es reciente (con retry), el caso 2 casi no ocurre; el snippet cubre los
+clientes con loader viejo.</p>
 
 <p>Helpers de logging:</p>
 <ul class="tight">
