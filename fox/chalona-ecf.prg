@@ -302,7 +302,7 @@ Function ChalonaEcfBuildDocJsonFox
   Local lnIprecio, lnIndicadorMontoGravado, lnFactorIprecio
   Local lnTipoEcf, lnBaseGrav, lnIndFact, lnIndFactLin, lnDiasNcRef, lcIndicadorNotaCredito, lnTolerancia, lnItbisEsperado, llDetTieneItbis, lnItbisLineaVal
   Local lnPropina, lnPropinaOM
-  Local lnSumGravadoI1, lnSumExento, lnSumItbisI1, lnSumGravadoI3, lnSumTotalDet, lnItbisLin
+  Local lnSumGravadoI1, lnSumExento, lnSumItbisI1, lnSumGravadoI3, lnSumTotalDet, lnItbisLin, lnTasaRec
   Local lnSumGravadoI2, lnSumItbisI2, lnSumGravadoI2OM, lnSumItbisI2OM
   Local lnSumGravadoI1OM, lnSumExentoOM, lnSumItbisI1OM, lnSumGravadoI3OM
   Local lnGravI1Final, lnItbisI1Final, lnTotalFinal
@@ -793,6 +793,14 @@ Function ChalonaEcfBuildDocJsonFox
         lnItbisLineaVal = Iif(lnItbis > 0, 1, 0)
         lnItbisLin = Round(lnMontoItem * Iif(lnTasaLin > 0, lnTasaLin, lnItbis1) / 100, 2)
       Endif
+      * Regla unica de verdad "el ITBIS cobrado manda": cuando el detalle trae
+      * imtrd.itbis por linea (llDetTieneItbis), la clasificacion gravado/exento y la
+      * tasa (I1/I2) se derivan del propio itbis cobrado, NO de itbis_tasa/itasa (que en
+      * catalogos incoherentes marca 18 en items vendidos exentos -> desfase DGII 11014).
+      * itbis=0 => exento; itbis>0 => tasa reconstruida round(itbis/monto*100): 16=>I2, resto=>I1.
+      * Agnostico a itasa (columna no presente en todas las versiones del ERP).
+      * Fallback (sin columna itbis): se conserva la logica previa por itbis_tasa/cabecera.
+      lnTasaRec = Iif(llDetTieneItbis And lnMontoItem > 0 And lnItbisLin > 0, Round(lnItbisLin / lnMontoItem * 100, 0), 0)
       lnSumTotalDet = lnSumTotalDet + lnMontoItem
       Do Case
       Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
@@ -804,6 +812,14 @@ Function ChalonaEcfBuildDocJsonFox
           lnSumGravadoI1 = lnSumGravadoI1 + lnMontoItem
           lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
         Endif
+      Case llDetTieneItbis And lnItbisLineaVal = 0
+        lnSumExento = lnSumExento + lnMontoItem
+      Case llDetTieneItbis And lnTasaRec = 16
+        lnSumGravadoI2 = lnSumGravadoI2 + lnMontoItem
+        lnSumItbisI2 = lnSumItbisI2 + lnItbisLin
+      Case llDetTieneItbis
+        lnSumGravadoI1 = lnSumGravadoI1 + lnMontoItem
+        lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
       Case lnTasaLin = 16
         lnSumGravadoI2 = lnSumGravadoI2 + lnMontoItem
         lnSumItbisI2 = lnSumItbisI2 + lnItbisLin
@@ -831,6 +847,14 @@ Function ChalonaEcfBuildDocJsonFox
             lnSumGravadoI1OM = lnSumGravadoI1OM + lnMontoItemOMloc
             lnSumItbisI1OM = lnSumItbisI1OM + lnItbisLinOM
           Endif
+        Case llDetTieneItbis And lnItbisLineaVal = 0
+          lnSumExentoOM = lnSumExentoOM + lnMontoItemOMloc
+        Case llDetTieneItbis And lnTasaRec = 16
+          lnSumGravadoI2OM = lnSumGravadoI2OM + lnMontoItemOMloc
+          lnSumItbisI2OM = lnSumItbisI2OM + lnItbisLinOM
+        Case llDetTieneItbis
+          lnSumGravadoI1OM = lnSumGravadoI1OM + lnMontoItemOMloc
+          lnSumItbisI1OM = lnSumItbisI1OM + lnItbisLinOM
         Case lnTasaLin = 16
           lnSumGravadoI2OM = lnSumGravadoI2OM + lnMontoItemOMloc
           lnSumItbisI2OM = lnSumItbisI2OM + lnItbisLinOM
@@ -1235,14 +1259,23 @@ Function ChalonaEcfBuildDocJsonFox
         Else
           lnItbisLineaVal = Iif(lnItbis > 0, 1, 0)
         Endif
-        * itbis_tasa por linea: 18=>I1, 16=>I2, >0 sin match => I1 (gravado tasa principal).
-        Local lnTasaLinIF
+        * itbis manda (idem primer scan de Totales): con imtrd.itbis por linea, exento/gravado
+        * y tasa salen del itbis cobrado, no de itbis_tasa/itasa. Coherencia detalle<->Totales.
+        * Fallback sin columna itbis: se conserva la logica previa por itbis_tasa/cabecera.
+        Local lnTasaLinIF, lnTasaRecIF
         lnTasaLinIF = Iif(Type("itbis_tasa") # "U", _ChalonaEcfNzNum(itbis_tasa), 0)
+        lnTasaRecIF = Iif(llDetTieneItbis And lnMontoItem > 0 And lnItbisLineaVal > 0, Round(lnItbisLineaVal * lnTasaFactor / lnMontoItem * 100, 0), 0)
         Do Case
         Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
           lnIndFactLin = 4
         Case lnTipoEcf = 46
           lnIndFactLin = Iif(lnItbis = 0, 3, 1)
+        Case llDetTieneItbis And lnItbisLineaVal = 0
+          lnIndFactLin = 4
+        Case llDetTieneItbis And lnTasaRecIF = 16
+          lnIndFactLin = 2
+        Case llDetTieneItbis
+          lnIndFactLin = 1
         Case lnTasaLinIF = 16
           lnIndFactLin = 2
         Case lnTasaLinIF > 0
