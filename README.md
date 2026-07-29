@@ -57,7 +57,7 @@ data.
 | [`python-driver/`](python-driver/) | Cliente Python — `.py` source via `exec()` en namespace aislado, stdlib only |
 | [`sql/`](sql/) | Schema Postgres standalone (tablas + funciones) |
 | [`docs/`](docs/) | Arquitectura, quickstarts, limitaciones |
-| [`docs/protocolo-http.md`](docs/protocolo-http.md) | **Sin cliente** — contrato HTTP crudo para integrar en cualquier lenguaje |
+| [`docs/protocolo-http.md`](docs/protocolo-http.md) | **Sin cliente** — contrato HTTP crudo para integrar en cualquier lenguaje (incluye [multimoneda / facturación en divisa](docs/protocolo-http.md#multimoneda--facturar-en-dólares-u-otra-divisa)) |
 
 ## Cómo empezar
 

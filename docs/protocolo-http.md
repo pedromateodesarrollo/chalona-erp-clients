@@ -288,6 +288,263 @@ Las **notas (33/34)** llevan al nivel raíz del `json`:
 > Los montos de una **nota de crédito (34)** no pueden exceder
 > `total de la factura + suma de notas de débito (33)`.
 
+### Multimoneda — facturar en dólares (u otra divisa)
+
+La DGII exige que el comprobante viaje en **DOP**. Pero si tu ERP factura en
+USD, no conviertas todo a pesos y listo: el documento quedaría sin rastro de la
+divisa y la representación impresa no cuadraría con la factura de tu sistema.
+
+Se mandan **los dos planos a la vez**:
+
+| Plano | Dónde | Contenido |
+|---|---|---|
+| **DOP** (siempre) | `Totales`, `PrecioUnitarioItem`, `MontoItem`, `DescuentoMonto`, `MontoPago` | Montos convertidos a pesos. Es lo que DGII fiscaliza. |
+| **Divisa** (condicional) | `Encabezado.OtraMoneda` + campos `…OtraMoneda` en cada línea | Los mismos montos, en la moneda original. |
+
+Regla que el servidor valida **antes** de firmar: cada monto en divisa debe ser
+igual a su par en DOP dividido entre `TipoCambio`. Si no cuadra, la respuesta
+viene `ok:false` y el comprobante nunca sale hacia DGII.
+
+#### Bloque `Encabezado.OtraMoneda`
+
+```
+Encabezado
+└── OtraMoneda
+    ├── TipoMoneda                        "USD"   (código ISO, catálogo DGII)
+    ├── TipoCambio                        "60.5000"
+    ├── MontoGravadoTotalOtraMoneda       ← Totales.MontoGravadoTotal ÷ tasa
+    ├── MontoGravado1OtraMoneda           ← Totales.MontoGravadoI1  (18%)
+    ├── MontoGravado2OtraMoneda           ← Totales.MontoGravadoI2  (16%)
+    ├── MontoGravado3OtraMoneda           ← Totales.MontoGravadoI3  (0%)
+    ├── MontoExentoOtraMoneda             ← Totales.MontoExento
+    ├── TotalITBISOtraMoneda              ← Totales.TotalITBIS
+    ├── TotalITBIS1OtraMoneda             ← Totales.TotalITBIS1
+    ├── TotalITBIS2OtraMoneda             ← Totales.TotalITBIS2
+    ├── TotalITBIS3OtraMoneda             ← Totales.TotalITBIS3
+    ├── MontoImpuestoAdicionalOtraMoneda  ← Totales.MontoImpuestoAdicional
+    └── MontoTotalOtraMoneda              ← Totales.MontoTotal
+```
+
+`TipoMoneda` tiene que estar en el catálogo DGII; fuera de él la DGII rechaza
+con código **11204**:
+
+```
+BRL CAD CHF CHY COP DKK EUR GBP HTG JPY MXN NOK SCP SEK USD VEF XDR
+```
+
+El servidor normaliza los aliases comunes del dólar antes de validar
+(`US`, `USA`, `US$`, `USD$`, `DOLAR`, `DOLARES`, `DOLLAR`, `DOLLARS` → `USD`) y
+pasa el código a mayúsculas. Cualquier otro código desconocido corta el envío
+con `err.ecf.tipo_moneda_invalido`.
+
+#### Campos por línea — van **planos en el ítem**
+
+En el XML que recibe la DGII estos campos viven dentro de un bloque
+`<OtraMonedaDetalle>`, pero en el **JSON del API van directo sobre el ítem**. El
+servidor arma el bloque XML por ti.
+
+| Campo (en el ítem) | Par en DOP |
+|---|---|
+| `PrecioOtraMoneda` (4 dec.) | `PrecioUnitarioItem` |
+| `DescuentoOtraMoneda` | `DescuentoMonto` |
+| `RecargoOtraMoneda` | `RecargoMonto` |
+| `MontoItemOtraMoneda` | `MontoItem` |
+
+```jsonc
+// ✅ correcto — planos en el ítem
+{ "NumeroLinea": "1", "PrecioUnitarioItem": "7562.5000", "MontoItem": "75625.00",
+  "PrecioOtraMoneda": "125.0000", "MontoItemOtraMoneda": "1250.00" }
+
+// ❌ se ignora en silencio — el XML sale sin OtraMonedaDetalle
+{ "NumeroLinea": "1", "PrecioUnitarioItem": "7562.5000", "MontoItem": "75625.00",
+  "OtraMonedaDetalle": { "PrecioOtraMoneda": "125.0000", "MontoItemOtraMoneda": "1250.00" } }
+```
+
+#### Ejemplo completo — tipo 31 en USD, línea gravada + línea exenta
+
+Factura de US$1,775.00 a tasa **60.5000** (= RD$107,387.50):
+
+- Línea 1, gravada 18%: 10 × US$125.00 = US$1,250.00 → RD$75,625.00
+- Línea 2, exenta (flete): 1 × US$300.00 = US$300.00 → RD$18,150.00
+- ITBIS: US$225.00 → RD$13,612.50
+
+Este es el objeto `json` que va dentro del cuerpo de `POST /envia_ecf`:
+
+```json
+{
+  "Encabezado": {
+    "Version": "1.0",
+    "IdDoc": {
+      "TipoeCF": "31",
+      "eNCF": "E310000000045",
+      "FechaVencimientoSecuencia": "31-12-2026",
+      "IndicadorMontoGravado": "0",
+      "TipoIngresos": "01",
+      "TipoPago": "1",
+      "TablaFormasPago": [
+        { "FormaPago": "1", "MontoPago": "107387.50" }
+      ]
+    },
+    "Emisor": {
+      "RNCEmisor": "131996035",
+      "RazonSocialEmisor": "EXPORTADORA DEL CARIBE, S.R.L.",
+      "NombreComercial": "EXPORTADORA DEL CARIBE",
+      "DireccionEmisor": "AUTOPISTA DUARTE KM 14, SANTIAGO",
+      "FechaEmision": "27-07-2026"
+    },
+    "Comprador": {
+      "RNCComprador": "130862346",
+      "RazonSocialComprador": "IMPORTACIONES DEL ESTE, S.A.",
+      "CorreoComprador": "compras@ejemplo.com",
+      "DireccionComprador": "AV. ESPANA 45, SANTO DOMINGO ESTE"
+    },
+    "Totales": {
+      "MontoGravadoTotal": "75625.00",
+      "MontoGravadoI1": "75625.00",
+      "ITBIS1": "18",
+      "TotalITBIS": "13612.50",
+      "TotalITBIS1": "13612.50",
+      "MontoExento": "18150.00",
+      "MontoTotal": "107387.50"
+    },
+    "OtraMoneda": {
+      "TipoMoneda": "USD",
+      "TipoCambio": "60.5000",
+      "MontoGravadoTotalOtraMoneda": "1250.00",
+      "MontoGravado1OtraMoneda": "1250.00",
+      "MontoExentoOtraMoneda": "300.00",
+      "TotalITBISOtraMoneda": "225.00",
+      "TotalITBIS1OtraMoneda": "225.00",
+      "MontoTotalOtraMoneda": "1775.00"
+    }
+  },
+  "DetallesItems": [
+    {
+      "NumeroLinea": "1",
+      "IndicadorFacturacion": "1",
+      "NombreItem": "VALVULA DE BRONCE 2 PULG",
+      "IndicadorBienoServicio": "1",
+      "CantidadItem": "10.00",
+      "UnidadMedida": "43",
+      "PrecioUnitarioItem": "7562.5000",
+      "MontoItem": "75625.00",
+      "PrecioOtraMoneda": "125.0000",
+      "MontoItemOtraMoneda": "1250.00"
+    },
+    {
+      "NumeroLinea": "2",
+      "IndicadorFacturacion": "4",
+      "NombreItem": "FLETE INTERNACIONAL",
+      "IndicadorBienoServicio": "2",
+      "CantidadItem": "1.00",
+      "UnidadMedida": "43",
+      "PrecioUnitarioItem": "18150.0000",
+      "MontoItem": "18150.00",
+      "PrecioOtraMoneda": "300.0000",
+      "MontoItemOtraMoneda": "300.00"
+    }
+  ]
+}
+```
+
+Envío completo:
+
+```bash
+curl -s -X POST "$BASE/envia_ecf" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"locale":"es","rnc":"131996035","portal":"ecf","json": { ...el objeto de arriba... }}' | jq
+```
+
+La respuesta es la misma de cualquier `envia_ecf` (`estado`, `timbre`,
+`codigo_seguridad`, `track_id`). El `total` del registro se guarda en **DOP**.
+
+#### Cómo derivar los montos desde tu ERP
+
+Partiendo del precio en divisa por línea:
+
+```
+precio_dop  = round(precio_divisa * tasa, 4)
+monto_dop   = round(precio_dop * cantidad, 2)
+
+MontoGravadoTotal = Σ monto_dop de líneas con IndicadorFacturacion 1|2|3
+MontoExento       = Σ monto_dop de líneas con IndicadorFacturacion 4
+TotalITBIS1       = round(MontoGravadoI1 * 0.18, 2)
+MontoTotal        = MontoGravadoTotal + MontoExento + MontoNoFacturable
+                    + TotalITBIS + MontoImpuestoAdicional
+```
+
+y después **cada campo de `OtraMoneda` sale de dividir su par en DOP entre la
+misma tasa**, redondeado a 2 decimales. No los acumules por separado sumando las
+líneas en divisa: arrastrar redondeos línea por línea es la causa más común de
+descuadre.
+
+> `TipoCambio` viaja al XML de la DGII con **2 decimales**. Si tu ERP maneja
+> tasas de 4 decimales (ej. `58.0544`), la DGII validará contra `58.05`. Usa una
+> tasa de 2 decimales, o verifica que los montos en divisa sigan cuadrando con
+> la tasa redondeada.
+
+#### Los 4 chequeos que corre el servidor antes de mandar a DGII
+
+1. **Coherencia divisa ↔ DOP.** Cada `…OtraMoneda` se compara contra
+   `<par en DOP> ÷ TipoCambio`. Tolerancia:
+   `(número de líneas ÷ TipoCambio) + 0.01 por línea`.
+2. **Segmentación gravado vs exento.** El error más repetido: acumular todo en
+   `MontoGravadoTotalOtraMoneda` y omitir `MontoExentoOtraMoneda` cuando hay
+   `MontoExento` en DOP. DGII lo rechaza con **11260**; acá se corta antes.
+3. **`TotalITBISxOtraMoneda` condicional-obligatorio.** Si declaras
+   `MontoGravado3OtraMoneda` (tasa 0%), tienes que enviar
+   `TotalITBIS3OtraMoneda` **aunque valga `0.00`**; omitirlo produce rechazo
+   DGII **11300**. Igual con `TotalITBISOtraMoneda` cuando hay algún gravado.
+4. **Catálogo `TipoMoneda`** (arriba).
+
+Respuesta típica cuando el exento no se segmentó en la divisa:
+
+```json
+{
+  "ok": false,
+  "message": "Los totales no coinciden con el detalle. MontoExentoOtraMoneda = MontoExento ÷ TipoCambio. Segmente el exento en OtraMoneda; no lo acumule en MontoGravadoTotalOtraMoneda (DGII 11260).",
+  "data": {
+    "errors": [
+      {
+        "error": "ecf.total_detalle_no_coincide",
+        "path": "Encabezado.OtraMoneda.MontoExentoOtraMoneda",
+        "sumaDetalle": 300.0,
+        "total": 0.0,
+        "tipoCambio": 60.5
+      },
+      {
+        "error": "ecf.total_detalle_no_coincide",
+        "path": "Encabezado.OtraMoneda.MontoGravadoTotalOtraMoneda",
+        "sumaDetalle": 1250.0,
+        "total": 1550.0,
+        "tipoCambio": 60.5
+      }
+    ]
+  }
+}
+```
+
+Los errores de validación previa no traen un código único en `message`: ahí va
+el mensaje del primer problema, y `data.errors` trae **todos** con su `path`.
+Recórrelo completo antes de corregir.
+
+#### Checklist multimoneda
+
+- [ ] `Totales` y montos de línea en **DOP**; `OtraMoneda` y `…OtraMoneda` en la divisa.
+- [ ] `TipoMoneda` en el catálogo DGII; `TipoCambio` > 0.
+- [ ] Cada `…OtraMoneda` = su par en DOP ÷ `TipoCambio` (redondeo a 2 decimales).
+- [ ] Exento segmentado: `MontoExentoOtraMoneda` presente si hay `MontoExento`.
+- [ ] `TotalITBISxOtraMoneda` presente (aun en `0.00`) por cada `MontoGravadoxOtraMoneda`.
+- [ ] Campos de línea **planos**, sin envolver en `OtraMonedaDetalle`.
+- [ ] `MontoPago` de `TablaFormasPago` en DOP (no hay equivalente en divisa).
+
+Aplica igual a los tipos **46 (Exportación)** y **47 (Pagos al Exterior)**, que
+son los que más se facturan en divisa. En 46 las líneas van con
+`IndicadorFacturacion: "3"` (ITBIS 0%), así que acuérdate del punto 3.
+
+---
+
 Plantilla oficial de los 10 tipos (31, 32, 33, 34, 41, 43, 44, 45, 46, 47) —
 la misma que usa Chalona para certificación DGII:
 [`api/lib/src/ecf/fixtures/documentos_certificacion_dgii.json`](../../../api/lib/src/ecf/fixtures/documentos_certificacion_dgii.json)
@@ -384,7 +641,10 @@ curl -s -X POST "$BASE/consulta_estado" \
 5. [ ] Manejás `estado != Aceptado` (reintento / consulta_estado / mostrar
        `estado_descripcion`).
 6. [ ] Cubrís notas (33/34) con `InformacionReferencia`.
-7. [ ] Probás los 10 tipos con la plantilla de certificación antes de producción.
+7. [ ] Si facturás en divisa, cubrís
+       [multimoneda](#multimoneda--facturar-en-dólares-u-otra-divisa)
+       (`OtraMoneda` + campos de línea).
+8. [ ] Probás los 10 tipos con la plantilla de certificación antes de producción.
 
 Para arrancar el mapeo con ayuda de un agente de IA, instalá la skill
 `driver-cliente` (ver [README](../README.md)) — te scaffoldea las queries
