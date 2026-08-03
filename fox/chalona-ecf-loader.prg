@@ -157,6 +157,106 @@ Function chalonaAnularRangosArr
   Return loResp
 Endfunc
 
+*------------------------------------------------------------
+* e-CF recibidos de suplidores (lado receptor del estandar DGII).
+*
+* Recibir y acusar lo hace el servidor solo. Estas funciones son para la
+* CONFORMIDAD: ver lo que llego y decir si se aprueba o se rechaza.
+* Solo hacen falta si la empresa tiene autorizacion manual activa; con la
+* automatica (por defecto) el servidor aprueba al recibir.
+*------------------------------------------------------------
+
+* chalonaRecibidosListar([tlSoloPendientes] [, tnLimite]) -> ChalonaResponse
+*   tlSoloPendientes : .T. => solo los que esperan decision.
+*   tnLimite         : 1-500 (def. 100).
+*   data.result: id, emisor, emisor_nombre, tipo, numero, fecha, total,
+*                estado, aprobacion_estado (null = por decidir, 1 = aprobado,
+*                2 = rechazado).
+Function chalonaRecibidosListar
+  Lparameters tlSoloPendientes, tnLimite
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.RecibidosListar(tlSoloPendientes, tnLimite)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.RecibidosListar(tlSoloPendientes, tnLimite)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
+* chalonaRecibidoXml(tnId) -> ChalonaResponse
+*   data.result.xml: e-CF original del suplidor. data.result.acuse_xml: acuse.
+Function chalonaRecibidoXml
+  Lparameters tnId
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.RecibidoXml(tnId)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.RecibidoXml(tnId)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
+* chalonaRecibidoAprobar(tnId) -> ChalonaResponse
+*   Emite el ACECF firmado hacia DGII y hacia el suplidor.
+*   data.enviada_a_dgii = .F. NO es un fallo: la decision quedo guardada y el
+*   servidor reintenta solo. No repetir la llamada.
+Function chalonaRecibidoAprobar
+  Lparameters tnId
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.RecibidoAprobar(tnId)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.RecibidoAprobar(tnId)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
+* chalonaRecibidoRechazar(tnId, tcMotivo) -> ChalonaResponse
+*   tcMotivo obligatorio (max 250): viaja al suplidor dentro del ACECF.
+Function chalonaRecibidoRechazar
+  Lparameters tnId, tcMotivo
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.RecibidoRechazar(tnId, tcMotivo)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.RecibidoRechazar(tnId, tcMotivo)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
+* chalonaAutorizacionManual([tlValor]) -> ChalonaResponse
+*   Sin parametro consulta; con .T./.F. cambia si la conformidad es manual.
+Function chalonaAutorizacionManual
+  Lparameters tlValor
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.AutorizacionManual(tlValor)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.AutorizacionManual(tlValor)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
 * chalonaDescargaDocumentosEcf(tcFechaDesde, tcFechaHasta [, tcTiposJson]) -> ChalonaResponse
 Function chalonaDescargaDocumentosEcf
   Lparameters tcFechaDesde, tcFechaHasta, tcTiposJson

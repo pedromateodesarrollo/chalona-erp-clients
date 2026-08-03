@@ -84,6 +84,51 @@ loResp = chalonaDescargaDocumentosEcf("2026-01-01", "2026-01-31")
 Eso es todo. El loader detecta versiones nuevas del motor automáticamente
 en cada llamada.
 
+### e-CF que te mandan tus suplidores
+
+Además de emitir, tu empresa **recibe**: los suplidores electrónicos depositan
+sus facturas en tu servicio web y el servidor las acusa solo, sin que tu ERP
+haga nada. Lo que sí decide el ERP es la **conformidad** — si aceptás o rechazás
+comercialmente lo que te llegó.
+
+Por defecto la conformidad es **automática**: lo que llega bien se aprueba solo.
+Si preferís revisarlo antes, activás la aprobación manual:
+
+```foxpro
+* Consultar cómo está hoy
+loResp = chalonaAutorizacionManual()
+? loResp.data.autorizacion_manual        && .F. = automático
+
+* Pasar a manual
+loResp = chalonaAutorizacionManual(.T.)
+```
+
+Con la manual activa, listás lo que espera decisión y respondés:
+
+```foxpro
+* Solo lo pendiente de decidir
+loResp = chalonaRecibidosListar(.T.)
+
+* loResp.data.result → id, emisor, emisor_nombre, tipo, numero, fecha, total,
+*                      aprobacion_estado (null = por decidir, 1 = ok, 2 = rechazado)
+
+* Dar conformidad
+loResp = chalonaRecibidoAprobar(41)
+
+* O rechazar (el motivo es obligatorio y le llega al suplidor)
+loResp = chalonaRecibidoRechazar(41, "Mercancía no recibida")
+
+* El XML original firmado por el suplidor, si lo querés archivar
+loResp = chalonaRecibidoXml(41)
+```
+
+> `data.enviada_a_dgii = .F.` **no es un fallo**: la decisión ya quedó guardada
+> y el servidor reintenta el envío solo. No repitas la llamada.
+
+Para que tus suplidores puedan mandarte algo, tu URL de recepción tiene que
+estar registrada en el directorio de contribuyentes electrónicos de DGII. Ese
+trámite se hace en el portal de Impuestos Internos.
+
 ## 4. ERP con tablas distintas (DBF, otro esquema)
 
 El motor Fox incluye lógica SQL Server estándar (`dbo.imtr` / `dbo.gastos`

@@ -588,6 +588,133 @@ Respuesta:
 
 ---
 
+## Paso 4 — e-CF que te mandan tus suplidores
+
+Hasta aquí todo era **emitir**. La otra mitad del estándar DGII es **recibir**:
+tus suplidores electrónicos depositan sus facturas en tu propio servicio web, y
+vos tenés que acusarlas y decir si estás conforme.
+
+Eso ya lo hace Chalona por vos. Cuando tu empresa está dada de alta, el servidor
+expone estos endpoints públicos (los consume el suplidor, no tu ERP):
+
+| Endpoint | Qué recibe | Qué contesta |
+|---|---|---|
+| `POST /fe/recepcion/api/ecf` | el e-CF firmado del suplidor | un acuse `ARECF` firmado |
+| `POST /fe/aprobacioncomercial/api/ecf` | la conformidad de tu comprador sobre lo que vos emitiste | HTTP 200 / 400 |
+
+Antes de aceptar nada se valida el tipo de comprobante, la estructura contra el
+XSD oficial y **la firma digital**. Lo que no pasa esas validaciones se rechaza
+con acuse y su código de motivo; nunca llega a tu ERP.
+
+> **Para que te lleguen:** DGII tiene que conocer la URL de recepción de tu RNC.
+> Se registra en el portal de Impuestos Internos, en el directorio de
+> contribuyentes electrónicos. Sin ese paso, el endpoint funciona pero ningún
+> suplidor sabe a dónde mandar.
+
+### Conformidad: automática o manual
+
+La Norma General 01-20 pide que el receptor, además del acuse, exprese su
+conformidad mediante la Aprobación o Rechazo Comercial (o reportando la compra
+en el 606). Se controla con un interruptor por empresa:
+
+| `autorizacion_manual` | Qué pasa |
+|---|---|
+| `false` (por defecto) | Todo lo que llega bien se aprueba solo, y la aprobación sale hacia DGII y hacia el suplidor |
+| `true` | Cada comprobante espera que alguien decida desde tu ERP o desde ecf-mng |
+
+```
+POST /ecf_empresa_autorizacion_manual
+Authorization: Bearer <token>
+
+{ "valor": true }          // cambiar. Omitir "valor" para solo consultar.
+```
+
+```json
+{ "ok": true, "message": "", "data": { "empresa": 2, "autorizacion_manual": true } }
+```
+
+### Listar lo recibido
+
+```
+POST /ecf_recibido_list
+Authorization: Bearer <token>
+
+{ "pendientes": true, "limite": 100 }
+```
+
+Parámetros, todos opcionales: `desde` y `hasta` (`YYYY-MM-DD`), `emisor` (RNC del
+suplidor), `limite` (1-500, def. 100) y `pendientes` (`true` = solo lo que espera
+decisión, `false` = solo lo ya decidido, omitido = todo).
+
+```json
+{
+  "ok": true,
+  "data": {
+    "result": [
+      {
+        "id": 41,
+        "emisor": "130441202",
+        "emisor_nombre": "SUPLIDOR SRL",
+        "tipo": "31",
+        "numero": "E310000026827",
+        "fecha": "2026-08-03",
+        "total": 737.50,
+        "estado": "recibido",
+        "aprobacion_estado": null,
+        "aprobacion_origen": "",
+        "aprobacion_enviada_dgii": false,
+        "momento": "2026-08-03T15:20:13.000000Z"
+      }
+    ]
+  }
+}
+```
+
+`aprobacion_estado`: `null` = pendiente de decidir, `1` = aprobado, `2` =
+rechazado. Ese es el campo que tu ERP mira para saber qué le falta.
+
+Para el XML original firmado por el suplidor (y el acuse que le devolvimos):
+
+```
+POST /ecf_recibido_xml
+{ "id": 41 }
+```
+
+### Aprobar o rechazar
+
+```
+POST /ecf_recibido_aprobar
+Authorization: Bearer <token>
+
+{ "id": 41, "estado": 1 }
+```
+
+```
+{ "id": 41, "estado": 2, "motivo": "Mercancía no recibida" }
+```
+
+- `estado`: `1` aprobar, `2` rechazar.
+- `motivo`: **obligatorio si `estado=2`**, máximo 250 caracteres. Rechazar sin
+  motivo deja al suplidor sin nada que corregir, así que se rechaza la llamada.
+
+```json
+{ "ok": true, "data": { "id": 41, "estado": 1, "enviada_a_dgii": true } }
+```
+
+`enviada_a_dgii` dice si la aprobación ya quedó registrada en DGII. Si viene
+`false`, la decisión **igual quedó guardada** y el servidor la reintenta solo;
+no repitas la llamada.
+
+### Errores propios de este flujo
+
+| Código | Qué pasó |
+|---|---|
+| `err.ecf_recibido.no_encontrado` | Ese id no existe o es de otra empresa |
+| `err.ecf_recibido.motivo_requerido` | Rechazaste sin indicar motivo |
+| `err.ecf_aprobacion.estado_invalido` | `estado` no es 1 ni 2 |
+
+---
+
 ## Manejo de errores
 
 Cuando `ok=false`, `message` trae un **código**. Los más comunes:
@@ -638,6 +765,12 @@ curl -s -X POST "$BASE/consulta_estado" \
 3. [ ] Enviás un tipo 31 contra el entorno de pruebas y recibís `Aceptado`.
 4. [ ] Escribís `numero`, `estado`, `codigo_seguridad`, `fecha_firma`, `timbre`
        de vuelta a tu ERP.
+5. [ ] Registrás tu URL de recepción en el directorio de DGII (portal), para que
+       tus suplidores puedan mandarte sus e-CF.
+6. [ ] Decidís si la conformidad es automática o manual
+       (`ecf_empresa_autorizacion_manual`).
+7. [ ] Si es manual: leés `ecf_recibido_list` con `pendientes:true` y llamás
+       `ecf_recibido_aprobar` con la decisión.
 5. [ ] Manejás `estado != Aceptado` (reintento / consulta_estado / mostrar
        `estado_descripcion`).
 6. [ ] Cubrís notas (33/34) con `InformacionReferencia`.

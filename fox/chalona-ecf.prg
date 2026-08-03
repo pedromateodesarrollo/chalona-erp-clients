@@ -1814,6 +1814,97 @@ Define Class ChalonaEcf As Custom
     Return loOut
   Endproc
 
+  *------------------------------------------------------------
+  * e-CF que nos mandan los suplidores (lado receptor del estandar DGII).
+  *
+  * El suplidor deposita su factura en nuestro servicio web y el servidor le
+  * contesta un acuse firmado, sin que el ERP intervenga. Lo que el ERP si
+  * decide es la CONFORMIDAD: aprobar o rechazar comercialmente lo recibido.
+  *
+  * Si la empresa tiene autorizacion_manual = .F. (por defecto), el servidor
+  * aprueba solo y estos metodos son solo de consulta. Con .T., cada comprobante
+  * espera una llamada a RecibidoAprobar o RecibidoRechazar.
+  *------------------------------------------------------------
+
+  * RecibidosListar(tlSoloPendientes, tnLimite) -> ChalonaResponse
+  *
+  * data.result: arreglo con id, emisor, emisor_nombre, tipo, numero, fecha,
+  * total, estado y aprobacion_estado (null = por decidir, 1 = aprobado,
+  * 2 = rechazado).
+  *
+  *   tlSoloPendientes : .T. => solo los que esperan decision. .F. u omitido => todos.
+  *   tnLimite         : maximo de filas (1-500). Omitido => 100.
+  Procedure RecibidosListar
+    Lparameters tlSoloPendientes, tnLimite
+    Local lcData, lnLimite
+    lnLimite = Iif(Vartype(tnLimite) = "N" And tnLimite > 0, Int(tnLimite), 100)
+    lcData = '"limite":' + Transform(lnLimite)
+    If Vartype(tlSoloPendientes) = "L" And tlSoloPendientes
+      lcData = lcData + ',"pendientes":true'
+    Endif
+    Return This.ConsultaApi("ecf_recibido_list", "{" + lcData + "}")
+  Endproc
+
+  * RecibidoXml(tnId) -> ChalonaResponse
+  * data.result.xml: e-CF original firmado por el suplidor.
+  * data.result.acuse_xml: el acuse que le devolvimos.
+  Procedure RecibidoXml
+    Lparameters tnId
+    If Vartype(tnId) # "N" Or tnId <= 0
+      Return ChalonaResponseNew(.F., "err.ecf_recibido.id_requerido", "", "")
+    Endif
+    Return This.ConsultaApi("ecf_recibido_xml", '{"id":' + Transform(Int(tnId)) + '}')
+  Endproc
+
+  * RecibidoAprobar(tnId) -> ChalonaResponse
+  * Da conformidad y emite el ACECF firmado hacia DGII y hacia el suplidor.
+  * data.enviada_a_dgii dice si ya quedo registrada; si viene .F. la decision
+  * igual quedo guardada y el servidor reintenta solo (NO repetir la llamada).
+  Procedure RecibidoAprobar
+    Lparameters tnId
+    If Vartype(tnId) # "N" Or tnId <= 0
+      Return ChalonaResponseNew(.F., "err.ecf_recibido.id_requerido", "", "")
+    Endif
+    Return This.ConsultaApi("ecf_recibido_aprobar", ;
+      '{"id":' + Transform(Int(tnId)) + ',"estado":1}')
+  Endproc
+
+  * RecibidoRechazar(tnId, tcMotivo) -> ChalonaResponse
+  * El motivo es obligatorio (max 250 caracteres): viaja al suplidor dentro del
+  * ACECF, y sin el no tiene nada que corregir.
+  Procedure RecibidoRechazar
+    Lparameters tnId, tcMotivo
+    Local lcMotivo
+    If Vartype(tnId) # "N" Or tnId <= 0
+      Return ChalonaResponseNew(.F., "err.ecf_recibido.id_requerido", "", "")
+    Endif
+    lcMotivo = Alltrim(Nvl(tcMotivo, ""))
+    If Empty(lcMotivo)
+      Return ChalonaResponseNew(.F., "err.ecf_recibido.motivo_requerido", "", "")
+    Endif
+    If Len(lcMotivo) > 250
+      lcMotivo = Left(lcMotivo, 250)
+    Endif
+    Return This.ConsultaApi("ecf_recibido_aprobar", ;
+      '{"id":' + Transform(Int(tnId)) + ',"estado":2,"motivo":"' + _JsonEscape(lcMotivo) + '"}')
+  Endproc
+
+  * AutorizacionManual(tlValor) -> ChalonaResponse
+  *
+  * Sin parametro: consulta si la empresa aprueba manualmente.
+  * Con .T. / .F.: lo cambia.
+  * data.autorizacion_manual trae el estado resultante.
+  Procedure AutorizacionManual
+    Lparameters tlValor
+    Local lcData
+    If Vartype(tlValor) = "L"
+      lcData = '{"valor":' + Iif(tlValor, "true", "false") + '}'
+    Else
+      lcData = "{}"
+    Endif
+    Return This.ConsultaApi("ecf_empresa_autorizacion_manual", lcData)
+  Endproc
+
   * AnularRangos(tcTipo, tcRangosJson) -> ChalonaResponse
   *
   * Anula rangos de e-NCF no utilizados ante la DGII (servicio AnulacionECF).
