@@ -174,7 +174,7 @@ Function _ChalonaEcfNzNum
 Endfunc
 
 Function _ChalonaEcfFactorStripLinea
-  Lparameters tnIprecio, tnItbis1, tnItbisCab, tlDetTieneItbis
+  Lparameters tnIprecio, tnItbis1, tnItbisCab, tlDetTieneItbis, tnTipoEcf
   * Factor por el que se divide el PRECIO de LINEA para quitar el ITBIS incluido
   * cuando el ERP entrega precios con ITBIS (iprecio=1). Solo aplica a lineas
   * GRAVADAS; una linea exenta conserva su monto (factor 1). Evita que en una
@@ -185,6 +185,16 @@ Function _ChalonaEcfFactorStripLinea
   * (con ITBIS) aunque la linea traiga itbis=0; hay que quitarlo para enviar la base.
   * Distinto de un producto exento real (noaplicai=0), cuyo precio ya es neto.
   * Asume tasa 18% (igual que el strip estandar del builder).
+  * Tipos 43/44/47: IndicadorFacturacion se fuerza a 4 (exento) SIEMPRE, sin
+  * importar itbis/itbis_tasa real de la linea (ver Do Case mas abajo en el
+  * builder). Esta funcion decidia exento/gravado por su cuenta con el itbis
+  * real -> si la linea tenia ITBIS real, stripeaba 1.18 aunque el override la
+  * reporte como exenta, y el precio quedaba desfasado del Totales.MontoExento
+  * (bug: ecf.total_detalle_no_coincide, ratio exacto 1.18). Cortar aqui, antes
+  * de cualquier otra regla: estos tipos jamas stripean.
+  If tnTipoEcf = 43 Or tnTipoEcf = 44 Or tnTipoEcf = 47
+    Return 1
+  Endif
   Local lnNoAplicaI
   lnNoAplicaI = Iif(Type("noaplicai") # "U", _ChalonaEcfNzNum(noaplicai), 0)
   If tnIprecio = 1 And lnNoAplicaI = 1
@@ -669,16 +679,16 @@ Function ChalonaEcfBuildDocJsonFox
     llDetTieneItbis = (Type("itbis") != "U")
   Endif
 
+  lnTipoEcf = Val(lcTipoeCF)
   lnTotalBruto = 0
   If Used("curChalDet") And Reccount("curChalDet") > 0
     Select curChalDet
     Scan
-      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis), 6)
+      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf), 6)
       lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
       lnTotalBruto = lnTotalBruto + Round(lnP * lnC, 2)
     Endscan
   Endif
-  lnTipoEcf = Val(lcTipoeCF)
   lnBaseGrav = lnValor - lnDescMae
   Do Case
   Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
@@ -764,7 +774,7 @@ Function ChalonaEcfBuildDocJsonFox
   If !llCorrigeTexto And Used("curChalDet") And Reccount("curChalDet") > 0
     Select curChalDet
     Scan
-      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis), 6)
+      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf), 6)
       lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
       lnBruto = Round(lnP * lnC, 2)
       lnDescLin = 0
@@ -833,7 +843,7 @@ Function ChalonaEcfBuildDocJsonFox
         lnSumItbisI1 = lnSumItbisI1 + lnItbisLin
       Endcase
       If llMultiMoneda
-        lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis) * lnC, 2)
+        lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf) * lnC, 2)
         lnDescLinOMloc = Iif(lnDescMaeOM = 0 Or lnTotalBruto = 0, 0, Round(lnDescMaeOM * lnBruto / lnTotalBruto, 2))
         lnMontoItemOMloc = Round(lnBrutoOM - lnDescLinOMloc, 2)
         lnItbisLinOM = Round(lnMontoItemOMloc * Iif(lnTasaLin > 0, lnTasaLin, lnItbis1) / 100, 2)
@@ -1225,7 +1235,7 @@ Function ChalonaEcfBuildDocJsonFox
     If Used("curChalDet") And Reccount("curChalDet") > 0
       Select curChalDet
       Scan
-        lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis), 6)
+        lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf), 6)
         lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
         lnBruto = Round(lnP * lnC, 2)
         lnDescLin = 0
