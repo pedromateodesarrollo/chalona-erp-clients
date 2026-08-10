@@ -213,6 +213,77 @@ Function _ChalonaEcfFactorStripLinea
   Return Iif(tnIprecio = 1 And tnItbis1 > 0 And !llExenta, 1 + tnItbis1 / 100, 1)
 Endfunc
 
+Function _ChalonaEcfDescLineaDeriv
+  Lparameters tnBruto, tnDescProp, tnTasaFactor, tlDetTieneItbis
+  * Descuento de cabecera que le toca a ESTA linea GRAVADA, derivado del ITBIS
+  * que el ERP cobro. Devuelve -1 cuando no se puede derivar (linea exenta, sin
+  * columna itbis, tasa no reconstruible, o base derivada mayor que el bruto).
+  * Requiere estar posicionado en la fila de curChalDet.
+  *
+  * Por que: la regla del motor es "el ITBIS cobrado manda" (se envia imtrd.itbis
+  * tal cual). Si ademas repartimos el descuento de cabecera con OTRO criterio
+  * (proporcional al bruto), la base gravada que armamos deja de ser la base
+  * sobre la que el ERP calculo ese ITBIS, y DGII rechaza con 11014
+  * (MontoGravadoI1 x tasa != TotalITBIS1). Caso real RNC 101749652: el ERP
+  * resto los 585.00 de descuento completos del gravado, el motor prorrateo
+  * 11.33 a la linea exenta -> desfase de 2.04 = 11.33 x 18%.
+  *
+  * Si el ITBIS manda, la base que le corresponde manda tambien: base = itbis/tasa.
+  * El descuento derivado es bruto - base. Auto-adaptativo: si el ERP si prorratea
+  * proporcional, esto devuelve exactamente el reparto proporcional de siempre.
+  Local lnItbisLin, lnMontoProp, lnTasaRec, lnBaseDeriv, lnDesc
+  If !tlDetTieneItbis Or Type("itbis") = "U"
+    Return -1
+  Endif
+  lnItbisLin = Round(_ChalonaEcfNzNum(itbis) * tnTasaFactor, 2)
+  If lnItbisLin <= 0
+    Return -1
+  Endif
+  lnMontoProp = Round(tnBruto - tnDescProp, 2)
+  If lnMontoProp <= 0
+    Return -1
+  Endif
+  * Tasa reconstruida sobre el monto proporcional: el desfase que corregimos es
+  * de centavos sobre miles, asi que el redondeo a entero da la tasa correcta
+  * (18 o 16) aunque la base todavia no sea la definitiva.
+  lnTasaRec = Round(lnItbisLin / lnMontoProp * 100, 0)
+  If lnTasaRec <= 0
+    Return -1
+  Endif
+  lnBaseDeriv = Round(lnItbisLin / (lnTasaRec / 100), 2)
+  lnDesc = Round(tnBruto - lnBaseDeriv, 2)
+  If lnDesc < 0
+    Return -1
+  Endif
+  Return lnDesc
+Endfunc
+
+Function _ChalonaEcfDescuentoLinea
+  Lparameters tnBruto, tnTotalBruto, tnDescMae, tnTasaFactor, tlDetTieneItbis, tlDeriv, tnDescResto, tnBrutoExento
+  * Descuento de cabecera asignado a ESTA linea de curChalDet. Punto unico:
+  * los tres recorridos del detalle (totales, JSON de lineas, monto items) tienen
+  * que repartir igual o el detalle no cuadra con Totales.
+  * tlDeriv lo decide el builder tras el pre-scan; si viene .F. se reparte
+  * proporcional al bruto, como siempre.
+  Local lnDescProp, lnD
+  If tnDescMae = 0 Or tnTotalBruto = 0
+    Return 0
+  Endif
+  lnDescProp = Round(tnDescMae * tnBruto / tnTotalBruto, 2)
+  If !tlDeriv
+    Return lnDescProp
+  Endif
+  lnD = _ChalonaEcfDescLineaDeriv(tnBruto, lnDescProp, tnTasaFactor, tlDetTieneItbis)
+  If lnD >= 0
+    Return lnD
+  Endif
+  * Linea exenta: se lleva el remanente del descuento que las gravadas no consumieron.
+  If tnBrutoExento <= 0
+    Return 0
+  Endif
+  Return Round(tnDescResto * tnBruto / tnBrutoExento, 2)
+Endfunc
+
 Function _ChalonaEcfFmtDdMmYy
   Lparameters td
   Local ld
@@ -329,6 +400,8 @@ Function ChalonaEcfBuildDocJsonFox
   Local lnBaseGravOM, lnSumMontoItemsOM, lcOtraMoneda
   Local lnBaseGravO, lnItbisO, lnTotalO
   Local lcDetOM, lnPOM, lnDescLinOM, lnMontoItemOM, lnBrutoOM, lnDescLinOMloc
+  * Reparto del descuento de cabecera derivado del ITBIS cobrado (ver _ChalonaEcfDescuentoLinea).
+  Local llDescDeriv, lnDescResto, lnBrutoExentoTot, lnDescDerivSum, lnDescPropTmp, lnDescDerivTmp
   * Origen del documento: imtr (ventas) o gastos (compras). En gastos el eNCF vive en ncf y no hay detalle.
   Local llEsGastos
   * Para gastos: id de suplidor (para extranjero) y texto para item sintÃ©tico.
@@ -689,6 +762,37 @@ Function ChalonaEcfBuildDocJsonFox
       lnTotalBruto = lnTotalBruto + Round(lnP * lnC, 2)
     Endscan
   Endif
+
+  * Reparto del descuento de cabecera: derivado del ITBIS cobrado (ver
+  * _ChalonaEcfDescLineaDeriv) o proporcional al bruto si no se puede derivar.
+  * Este pre-scan solo mide: cuanto descuento consumen las gravadas al derivar y
+  * cuanto bruto exento hay para absorber el remanente. Sin ambas cifras el
+  * reparto no se puede cerrar y el MontoTotal se desviaria del total del ERP.
+  llDescDeriv = .F.
+  lnDescResto = 0
+  lnBrutoExentoTot = 0
+  If !llCorrigeTexto And lnDescMae # 0 And lnTotalBruto # 0 And llDetTieneItbis ;
+      And Used("curChalDet") And Reccount("curChalDet") > 0
+    lnDescDerivSum = 0
+    Select curChalDet
+    Scan
+      lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf), 6)
+      lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
+      lnBruto = Round(lnP * lnC, 2)
+      lnDescPropTmp = Round(lnDescMae * lnBruto / lnTotalBruto, 2)
+      lnDescDerivTmp = _ChalonaEcfDescLineaDeriv(lnBruto, lnDescPropTmp, lnTasaFactor, llDetTieneItbis)
+      If lnDescDerivTmp >= 0
+        lnDescDerivSum = lnDescDerivSum + lnDescDerivTmp
+      Else
+        lnBrutoExentoTot = lnBrutoExentoTot + lnBruto
+      Endif
+    Endscan
+    lnDescResto = Round(lnDescMae - lnDescDerivSum, 2)
+    * Activar solo si el reparto cierra: no puede consumir mas descuento del que
+    * hay, y si sobra remanente tiene que haber linea exenta que lo absorba.
+    llDescDeriv = (lnDescResto >= 0 And (lnDescResto = 0 Or lnBrutoExentoTot > 0))
+  Endif
+
   lnBaseGrav = lnValor - lnDescMae
   Do Case
   Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
@@ -740,15 +844,12 @@ Function ChalonaEcfBuildDocJsonFox
         lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor, 6)
         lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
         lnBruto = Round(lnP * lnC, 2)
-        lnDescLin = 0
-        If lnDescMae # 0 And lnTotalBruto # 0
-          lnDescLin = Round(lnDescMae * lnBruto / lnTotalBruto, 2)
-        Endif
+        lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot)
         lnMontoItem = Round(lnBruto - lnDescLin, 2)
         lnSumMontoItems = lnSumMontoItems + lnMontoItem
         If llMultiMoneda
           lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnC, 2)
-          lnDescLinOMloc = Iif(lnDescMaeOM = 0 Or lnTotalBruto = 0, 0, Round(lnDescMaeOM * lnBruto / lnTotalBruto, 2))
+          lnDescLinOMloc = Iif(lnDescLin = 0 Or lnTasaFactor = 0, 0, Round(lnDescLin / lnTasaFactor, 2))
           lnSumMontoItemsOM = lnSumMontoItemsOM + Round(lnBrutoOM - lnDescLinOMloc, 2)
         Endif
       Endscan
@@ -777,10 +878,7 @@ Function ChalonaEcfBuildDocJsonFox
       lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf), 6)
       lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
       lnBruto = Round(lnP * lnC, 2)
-      lnDescLin = 0
-      If lnDescMae # 0 And lnTotalBruto # 0
-        lnDescLin = Round(lnDescMae * lnBruto / lnTotalBruto, 2)
-      Endif
+      lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot)
       lnMontoItem = Round(lnBruto - lnDescLin, 2)
       * Saltar lineas con monto 0 (ruido del ERP: cantidad sin precio o precio sin cantidad).
       * Si quedan en detalle generan inconsistencias (p.ej. IF=4 con monto 0 -> DGII 1960 MontoExento).
@@ -844,7 +942,7 @@ Function ChalonaEcfBuildDocJsonFox
       Endcase
       If llMultiMoneda
         lnBrutoOM = Round(_ChalonaEcfStrToDecimal(Transform(precio)) / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf) * lnC, 2)
-        lnDescLinOMloc = Iif(lnDescMaeOM = 0 Or lnTotalBruto = 0, 0, Round(lnDescMaeOM * lnBruto / lnTotalBruto, 2))
+        lnDescLinOMloc = Iif(lnDescLin = 0 Or lnTasaFactor = 0, 0, Round(lnDescLin / lnTasaFactor, 2))
         lnMontoItemOMloc = Round(lnBrutoOM - lnDescLinOMloc, 2)
         lnItbisLinOM = Round(lnMontoItemOMloc * Iif(lnTasaLin > 0, lnTasaLin, lnItbis1) / 100, 2)
         Do Case
@@ -1238,10 +1336,7 @@ Function ChalonaEcfBuildDocJsonFox
         lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf), 6)
         lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
         lnBruto = Round(lnP * lnC, 2)
-        lnDescLin = 0
-        If lnDescMae # 0 And lnTotalBruto # 0
-          lnDescLin = Round(lnDescMae * lnBruto / lnTotalBruto, 2)
-        Endif
+        lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot)
         lnMontoItem = Round(lnBruto - lnDescLin, 2)
         * Coherente con el primer scan (totales): saltar lineas con monto 0.
         If lnMontoItem = 0
