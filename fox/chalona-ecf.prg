@@ -1673,7 +1673,7 @@ Define Class ChalonaEcf As Custom
         If Isnull(lcDocJson)
           ChalonaEcfLogError("JSON: ChalonaEcfBuildDocJsonFox devolviÃ³ .Null.", tcControl, "")
           If Type("gcChalonaEcfBuildDocError") = "C" And !Empty(Alltrim(Nvl(gcChalonaEcfBuildDocError, "")))
-            loResp = ChalonaResponseNew(.F., gcChalonaEcfBuildDocError, "", "")
+            loResp = ChalonaResponseNew(.F., _ChalonaEcfMsgBuildError(gcChalonaEcfBuildDocError), "", "")
           Else
             loResp = ChalonaResponseNew(.F., "sql.ecf2json.error", "", "")
           Endif
@@ -2557,7 +2557,7 @@ Define Class ChalonaEcf As Custom
         lcDocJson = ChalonaEcfBuildDocJsonFox(tcControl, This.Cfg)
         If Isnull(lcDocJson)
           If Type("gcChalonaEcfBuildDocError") = "C" And !Empty(Alltrim(Nvl(gcChalonaEcfBuildDocError, "")))
-            loResp = ChalonaResponseNew(.F., gcChalonaEcfBuildDocError, "", "")
+            loResp = ChalonaResponseNew(.F., _ChalonaEcfMsgBuildError(gcChalonaEcfBuildDocError), "", "")
           Else
             loResp = ChalonaResponseNew(.F., "ecf.build.error", "", "")
           Endif
@@ -4094,6 +4094,47 @@ Function ChalonaMostrarErrorEnvioEcf
 Endfunc
 
 * Helper para instanciar ChalonaResponse desde las funciones
+*------------------------------------------------------------
+* Mensaje legible de los cortes locales del armado (gcChalonaEcfBuildDocError).
+* Estos errores NUNCA llegan al API: el documento se corta antes de enviarlo, asi
+* que nadie mas los traduce y el ERP muestra tal cual lo que devolvemos. Sin esto
+* el operador ve el codigo pelado (p.ej. "ecf.tipo_ecf_exento_no_admite_itbis") y
+* no sabe que hacer. El codigo va al final del texto, entre parentesis, para que
+* siga viajando en el reporte que el cliente le manda a soporte.
+* Sin acentos a proposito: el .prg se publica en la BD y se lee desde VFP.
+*------------------------------------------------------------
+Function _ChalonaEcfMsgBuildError
+  Lparameters tcCode
+  Local lcCode, lcTexto
+  lcCode = Alltrim(Nvl(tcCode, ""))
+  If Empty(lcCode)
+    Return ""
+  Endif
+  Do Case
+  Case lcCode == "ecf.tipo_ecf_exento_no_admite_itbis"
+    lcTexto = "El documento lleva ITBIS, pero su tipo de comprobante es exento por norma DGII " + ;
+      "(43 Gastos Menores, 44 Regimenes Especiales, 47 Pagos al Exterior). " + ;
+      "Emita el documento sin ITBIS, o cambielo a Factura de Credito Fiscal (31) si el ITBIS cobrado es correcto."
+  Case lcCode == "ecf.monto_total_mayor_cero_compras_gastos"
+    lcTexto = "Los tipos 41 (Compras) y 43 (Gastos Menores) deben llevar un monto mayor que cero; la DGII rechaza los totales en cero."
+  Case lcCode == "ecf.gastos.tipo_no_permitido"
+    lcTexto = "El tipo de comprobante del documento no esta permitido para un registro de gastos."
+  Case lcCode == "ecf.encf_tipo_no_coincide"
+    lcTexto = "El e-NCF asignado no corresponde al tipo de comprobante del documento."
+  Case lcCode == "ecf.iddoc.fecha_vencimiento_requerida"
+    lcTexto = "Falta la fecha de vencimiento de la secuencia de e-NCF."
+  Case lcCode == "ecf.nc34.fecha_ncf_modificado_requerida"
+    lcTexto = "En la Nota de Credito falta la fecha del comprobante que se esta modificando."
+  Case lcCode == "ecf.nc34.fecha_emision_requerida"
+    lcTexto = "En la Nota de Credito falta la fecha de emision."
+  Case lcCode == "ecf.build.unhandled_exception"
+    lcTexto = "Error no manejado al armar el comprobante. Reintente; si persiste, envie este texto a soporte."
+  Otherwise
+    Return lcCode
+  Endcase
+  Return lcTexto + " (" + lcCode + ")"
+Endfunc
+
 Function ChalonaResponseNew
   Lparameters tlOk, tcMessage, tcDataJson, tcRaw
   Local lo
