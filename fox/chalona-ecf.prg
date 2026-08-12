@@ -814,6 +814,22 @@ Function ChalonaEcfBuildDocJsonFox
     Exit
   Endif
 
+  * Tipos 43/44/47 con ITBIS de cabecera: cortar, no armar el documento.
+  * Manual DGII nota 50: estos tipos exigen IndicadorFacturacion=4 (Exento) en TODAS las
+  * lineas, y el builder lo fuerza sin condicion (lnIndFact arriba, lnIndFactLin en el
+  * detalle, y _ChalonaEcfFactorStripLinea que jamas stripea). Un documento de estos con
+  * imtr.itbis != 0 es una incoherencia del ERP, no un caso a resolver aqui: el detalle
+  * saldria todo exento contra unos Totales gravados -> ecf.total_detalle_no_coincide en
+  * MontoGravadoI1 y MontoExento a la vez. Medido en Duralon: 14 de 878 tipo 44, los 14
+  * Rechazado desde 2024-09. No se recalculan montos fiscales por cuenta propia; el
+  * operador decide: factura exenta (quitar el ITBIS) o tipo 31 si el ITBIS es real.
+  If !llCorrigeTexto And (lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47) And lnItbis # 0
+    ChalonaEcfLogError("ECF: TipoeCF " + Transform(lnTipoEcf) + " no admite ITBIS (nota 50 DGII: exento)", tcControl, "")
+    gcChalonaEcfBuildDocError = "ecf.tipo_ecf_exento_no_admite_itbis"
+    llNull = .T.
+    Exit
+  Endif
+
   If lnDiasCr > 0
     lnTipoPago = 2
     Do Case
@@ -1068,29 +1084,22 @@ Function ChalonaEcfBuildDocJsonFox
   Else
   Do Case
   Case lnTipoEcf = 43 Or lnTipoEcf = 44 Or lnTipoEcf = 47
-    * Puede venir 43 con ITBIS (p. ej. compras desde gastos). Solo tratar como exento si itbis=0.
-    If lnItbis = 0
-      lcTot = "{" + ;
-        '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-        '"MontoGravadoI1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-        '"MontoGravadoI2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-        '"MontoGravadoI3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-        '"MontoExento":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
-        '"TotalITBIS":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-        '"ITBIS1":0,"ITBIS2":0,"ITBIS3":0,' + ;
-        '"TotalITBIS1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-        '"TotalITBIS2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-        '"TotalITBIS3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
-        '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
-    Else
-      lcTot = "{" + ;
-        '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
-        '"MontoGravadoI1":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
-        '"TotalITBIS":' + _ChalonaEcfJsonNum(lnItbis, 2) + "," + ;
-        '"ITBIS1":' + Transform(Iif(lnItbis = 0, 0, lnItbis1)) + "," + ;
-        '"TotalITBIS1":' + _ChalonaEcfJsonNum(lnItbis, 2) + "," + ;
-        '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
-    Endif
+    * Siempre exento (nota 50 DGII). El caso itbis != 0 ya corto arriba con
+    * ecf.tipo_ecf_exento_no_admite_itbis: aqui lnItbis = 0 garantizado.
+    * NO reintroducir una rama gravada: el detalle de estos tipos va todo con
+    * IndicadorFacturacion=4 y unos Totales gravados no cuadran con el nunca.
+    lcTot = "{" + ;
+      '"MontoGravadoTotal":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+      '"MontoGravadoI1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+      '"MontoGravadoI2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+      '"MontoGravadoI3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+      '"MontoExento":' + _ChalonaEcfJsonNum(lnBaseGrav, 2) + "," + ;
+      '"TotalITBIS":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+      '"ITBIS1":0,"ITBIS2":0,"ITBIS3":0,' + ;
+      '"TotalITBIS1":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+      '"TotalITBIS2":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+      '"TotalITBIS3":' + _ChalonaEcfJsonNum(0, 2) + "," + ;
+      '"MontoTotal":' + _ChalonaEcfJsonNum(lnTotal, 2) + "}"
   Case lnTipoEcf = 46
     If lnItbis = 0
       * Nota 51 DGII: tasa cero -> MontoGravadoI3, no MontoGravadoI1.
