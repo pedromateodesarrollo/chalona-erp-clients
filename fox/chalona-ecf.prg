@@ -259,13 +259,29 @@ Function _ChalonaEcfDescLineaDeriv
 Endfunc
 
 Function _ChalonaEcfDescuentoLinea
-  Lparameters tnBruto, tnTotalBruto, tnDescMae, tnTasaFactor, tlDetTieneItbis, tlDeriv, tnDescResto, tnBrutoExento
+  Lparameters tnBruto, tnTotalBruto, tnDescMae, tnTasaFactor, tlDetTieneItbis, tlDeriv, tnDescResto, tnBrutoExento, tlDescLinea
   * Descuento de cabecera asignado a ESTA linea de curChalDet. Punto unico:
   * los tres recorridos del detalle (totales, JSON de lineas, monto items) tienen
   * que repartir igual o el detalle no cuadra con Totales.
-  * tlDeriv lo decide el builder tras el pre-scan; si viene .F. se reparte
-  * proporcional al bruto, como siempre.
+  *
+  * PRECEDENCIA (de mas fuerte a mas debil):
+  *   1. Descuento POR LINEA del ERP (tlDescLinea). Es un dato, no una decision
+  *      nuestra: si el ERP ya repartio, repartir de nuevo con otro criterio
+  *      rompe la base sobre la que calculo el ITBIS de cada linea -> DGII 11014.
+  *      Caso real TOLEDO MATTRESS (E320000000117): el ERP dio 25% de descuento
+  *      a UNA linea (imtrd.descuento = 1886.78, la otra 0) y el motor prorrateo
+  *      57.8/42.2, moviendo las bases y dejando el itbis por linea colgado.
+  *   2. Derivado del ITBIS cobrado (tlDeriv, fix 30e1c3b) cuando no hay dato.
+  *   3. Proporcional al bruto, ultimo recurso.
+  *
+  * tlDescLinea lo decide el builder en el pre-scan y SOLO es .T. si la suma de
+  * los descuentos de linea cuadra con imtr.descuento. Un cursor de integrador
+  * que no llene la columna suma 0, no cuadra, y cae al reparto de siempre.
   Local lnDescProp, lnD
+  * Alias explicito: curChalMae tambien tiene campo descuento (el de cabecera).
+  If tlDescLinea And Type("curChalDet.descuento") # "U"
+    Return Round(_ChalonaEcfNzNum(curChalDet.descuento) * tnTasaFactor, 2)
+  Endif
   If tnDescMae = 0 Or tnTotalBruto = 0
     Return 0
   Endif
@@ -373,7 +389,7 @@ Function ChalonaEcfBuildDocJsonFox
   * que las flags como dgii_multimoneda están vacías.
   Local lcQ, lcSql, lcJson, lnTotalBruto, lnLn, lcDet, lcSep
   Local lcTipoeCF, lcEncf, ldFecEmi, lnDiasCr, lnValor, lnDescMae, lnItbis, lnTotal
-  Local lcMaeRnc, lcMaeNombre, lcEntidad, lcOcontrol
+  Local lcMaeRnc, lcMaeNombre, lcEntidad, lcOcontrol, lcMaeCorreo
   Local ldFecVen, lcFecVen, lcEmpRnc, lcEmpNom, lcEmpDir, lnExtranjero
   Local lcRefEncf, ldRefFec, lcInfRef, lcIdDoc, lcEmisor, lcComp, lcTot
   Local lnP, lnC, lnBruto, lnDescLin, lnMontoItem, lcNomItem, lcDescItem, lnIndBS
@@ -402,6 +418,7 @@ Function ChalonaEcfBuildDocJsonFox
   Local lcDetOM, lnPOM, lnDescLinOM, lnMontoItemOM, lnBrutoOM, lnDescLinOMloc
   * Reparto del descuento de cabecera derivado del ITBIS cobrado (ver _ChalonaEcfDescuentoLinea).
   Local llDescDeriv, lnDescResto, lnBrutoExentoTot, lnDescDerivSum, lnDescPropTmp, lnDescDerivTmp
+  Local llDescLinea, lnDescLineaSum
   * Origen del documento: imtr (ventas) o gastos (compras). En gastos el eNCF vive en ncf y no hay detalle.
   Local llEsGastos
   * Para gastos: id de suplidor (para extranjero) y texto para item sintÃ©tico.
@@ -768,10 +785,31 @@ Function ChalonaEcfBuildDocJsonFox
   * Este pre-scan solo mide: cuanto descuento consumen las gravadas al derivar y
   * cuanto bruto exento hay para absorber el remanente. Sin ambas cifras el
   * reparto no se puede cerrar y el MontoTotal se desviaria del total del ERP.
+  * Regla 0: si el ERP ya reparti el descuento por linea, ese dato manda y no hay
+  * nada que decidir. Se valida a nivel DOCUMENTO (la suma tiene que cuadrar con
+  * imtr.descuento) en vez de confiar en que la columna exista: un cursor de
+  * integrador que no la llene suma 0, no cuadra, y cae al reparto de siempre.
+  * Los descuentos de linea vienen en la moneda del documento, igual que precio,
+  * asi que se comparan contra lnDescMae ya multiplicado por lnTasaFactor.
+  llDescLinea = .F.
+  If !llCorrigeTexto And lnDescMae # 0 And Used("curChalDet") And Reccount("curChalDet") > 0
+    Select curChalDet
+    * Alias explicito: curChalMae TAMBIEN tiene un campo descuento (el de
+    * cabecera). Sin calificar, VFP puede resolver contra la otra area de trabajo
+    * y confundir el descuento del documento con el de la linea.
+    If Type("curChalDet.descuento") # "U"
+      lnDescLineaSum = 0
+      Scan
+        lnDescLineaSum = lnDescLineaSum + Round(_ChalonaEcfNzNum(curChalDet.descuento) * lnTasaFactor, 2)
+      Endscan
+      llDescLinea = (Abs(lnDescMae - Round(lnDescLineaSum, 2)) <= 0.05)
+    Endif
+  Endif
+
   llDescDeriv = .F.
   lnDescResto = 0
   lnBrutoExentoTot = 0
-  If !llCorrigeTexto And lnDescMae # 0 And lnTotalBruto # 0 And llDetTieneItbis ;
+  If !llCorrigeTexto And !llDescLinea And lnDescMae # 0 And lnTotalBruto # 0 And llDetTieneItbis ;
       And Used("curChalDet") And Reccount("curChalDet") > 0
     lnDescDerivSum = 0
     Select curChalDet
@@ -860,7 +898,7 @@ Function ChalonaEcfBuildDocJsonFox
         lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor, 6)
         lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
         lnBruto = Round(lnP * lnC, 2)
-        lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot)
+        lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot, llDescLinea)
         lnMontoItem = Round(lnBruto - lnDescLin, 2)
         lnSumMontoItems = lnSumMontoItems + lnMontoItem
         If llMultiMoneda
@@ -894,7 +932,7 @@ Function ChalonaEcfBuildDocJsonFox
       lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf), 6)
       lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
       lnBruto = Round(lnP * lnC, 2)
-      lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot)
+      lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot, llDescLinea)
       lnMontoItem = Round(lnBruto - lnDescLin, 2)
       * Saltar lineas con monto 0 (ruido del ERP: cantidad sin precio o precio sin cantidad).
       * Si quedan en detalle generan inconsistencias (p.ej. IF=4 con monto 0 -> DGII 1960 MontoExento).
@@ -1063,10 +1101,27 @@ Function ChalonaEcfBuildDocJsonFox
   If lnTipoEcf = 47
     lnExtranjero = 1
   Endif
+  * Correo del comprador (opcional en todos los tipos, minOccurs=0). Se emite
+  * SOLO si parece direccion y cabe en 80: DGII rechaza con 1424 un valor que no
+  * cumpla CorreoValidationType. Es la direccion a la que el servidor le manda
+  * el comprobante al cliente; si no viene, no se manda correo y ya.
+  lcMaeCorreo = ""
+  If Used("curChalCli") And Reccount("curChalCli") > 0
+    Select curChalCli
+    Go Top
+    If Type("curChalCli.correo") # "U"
+      lcMaeCorreo = Alltrim(Transform(Nvl(correo, "")))
+    Endif
+  Endif
+  If At("@", lcMaeCorreo) < 2 Or Len(lcMaeCorreo) > 80
+    lcMaeCorreo = ""
+  Endif
+
   * Comprador extranjero: usar IdentificadorExtranjero y dejar RNCComprador vacio.
   lcComp = "{" + '"RNCComprador":"' + _JsonEscape(Iif(lnExtranjero = 0, _ChalonaEcfNormalizeTexto(lcMaeRnc), "")) + '",' + ;
     '"IdentificadorExtranjero":"' + _JsonEscape(Iif(lnExtranjero = 0, "", _ChalonaEcfNormalizeTexto(lcMaeRnc))) + '",' + ;
-    '"RazonSocialComprador":"' + _JsonEscape(_ChalonaEcfNormalizeTexto(lcMaeNombre)) + '"}'
+    '"RazonSocialComprador":"' + _JsonEscape(_ChalonaEcfNormalizeTexto(lcMaeNombre)) + ;
+    Iif(Empty(lcMaeCorreo), "", '","CorreoComprador":"' + _JsonEscape(lcMaeCorreo)) + '"}'
 
   If llCorrigeTexto
     lcTot = "{" + ;
@@ -1345,7 +1400,7 @@ Function ChalonaEcfBuildDocJsonFox
         lnP = Round(_ChalonaEcfStrToDecimal(Transform(precio)) * lnTasaFactor / _ChalonaEcfFactorStripLinea(lnIprecio, lnItbis1, lnItbis, llDetTieneItbis, lnTipoEcf), 6)
         lnC = _ChalonaEcfStrToDecimal(Transform(cantidad))
         lnBruto = Round(lnP * lnC, 2)
-        lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot)
+        lnDescLin = _ChalonaEcfDescuentoLinea(lnBruto, lnTotalBruto, lnDescMae, lnTasaFactor, llDetTieneItbis, llDescDeriv, lnDescResto, lnBrutoExentoTot, llDescLinea)
         lnMontoItem = Round(lnBruto - lnDescLin, 2)
         * Coherente con el primer scan (totales): saltar lineas con monto 0.
         If lnMontoItem = 0
@@ -2472,7 +2527,8 @@ Define Class ChalonaEcf As Custom
        itbis_tasa     N(5,2), ;
        itbis_retenido N(18,2), ;
        isr_retenido   N(18,2), ;
-       noaplicai      N(1))
+       noaplicai      N(1), ;
+       descuento      N(18,2))
 
     ChalonaEcfUseInIfUsed("curChalEmp")
     Create Cursor curChalEmp ;
@@ -2485,7 +2541,8 @@ Define Class ChalonaEcf As Custom
     Create Cursor curChalCli ;
       (extranjero_flag N(1), ;
        rnc             C(20), ;
-       nombre          C(150))
+       nombre          C(150), ;
+       correo          C(80))
 
     ChalonaEcfUseInIfUsed("curChalRef")
     Create Cursor curChalRef ;
@@ -3000,7 +3057,7 @@ Define Class ChalonaEcf As Custom
     Zap
 
     Local lnPrecio, lnCantidad, lcDescrip, lcMercsNombre, lnMercsServicio
-    Local lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet, lnNoAplicaI
+    Local lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet, lnNoAplicaI, lnDescLinERP
     Select (lcRaw)
     Scan
       lnPrecio        = Iif(Type("precio") # "U", _ChalonaEcfNzNum(precio), 0)
@@ -3018,9 +3075,16 @@ Define Class ChalonaEcf As Custom
       * noaplicai: flag "no aplica ITBIS" (producto gravado con ITBIS suprimido, p.ej.
       * NC >30 dias sin ITBIS). El precio sigue siendo gross; se strippea en el builder.
       lnNoAplicaI     = Iif(Type("noaplicai") # "U", _ChalonaEcfNzNum(noaplicai), 0)
+      * Descuento POR LINEA del ERP. Existe en ERPs que reparten el descuento en
+      * el detalle (Toledo: imtrd.descuento, con dtasa = % de descuento). Sin esta
+      * columna el motor prorratea imtr.descuento proporcional al bruto y destruye
+      * un reparto que ya venia resuelto: ver _ChalonaEcfDescuentoLinea.
+      * OJO: no confundir con dtasa, que segun el ERP es tasa de descuento (Toledo)
+      * o tasa de ITBIS (Duralon). La tasa de ITBIS se lee de itasa/itbis_tasa.
+      lnDescLinERP    = Iif(Type("descuento") # "U", _ChalonaEcfNzNum(descuento), 0)
       Insert Into curChalDet ;
-        (precio, cantidad, descrip, mercs_nombre, mercs_servicio, itbis, itbis_tasa, itbis_retenido, isr_retenido, noaplicai) ;
-        Values (lnPrecio, lnCantidad, Left(lcDescrip, 200), Left(lcMercsNombre, 200), lnMercsServicio, lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet, lnNoAplicaI)
+        (precio, cantidad, descrip, mercs_nombre, mercs_servicio, itbis, itbis_tasa, itbis_retenido, isr_retenido, noaplicai, descuento) ;
+        Values (lnPrecio, lnCantidad, Left(lcDescrip, 200), Left(lcMercsNombre, 200), lnMercsServicio, lnItbisLin, lnItbisTasa, lnItbisRet, lnIsrRet, lnNoAplicaI, lnDescLinERP)
     Endscan
 
     ChalonaEcfUseInIfUsed(lcRaw)
@@ -3152,10 +3216,66 @@ Define Class ChalonaEcf As Custom
       lcNombre  = Iif(Type("nombre") # "U", Alltrim(Transform(Nvl(nombre, ""))), "")
       Insert Into curChalCli (extranjero_flag, rnc, nombre) ;
         Values (lnExtFlag, Left(lcRnc, 20), Left(lcNombre, 150))
+      * Correo del comprador: consulta APARTE y tolerante a fallo. No se mete en
+      * el SELECT de arriba a proposito — si un ERP no tiene la columna email,
+      * un SELECT unico reventaria y se llevaria por delante el lookup de
+      * extranjero, que hoy funciona. El correo es accesorio; el e-CF no.
+      This.CargarCorreoCliente(tcCodigo, tlEsGastos)
     Endif
     ChalonaEcfUseInIfUsed(lcRaw)
     Select curChalCli
     Return "curChalCli"
+  Endfunc
+
+  * Correo del comprador -> curChalCli.correo, para emitir CorreoComprador.
+  *
+  * Deliberadamente silenciosa: si la tabla del ERP no tiene columna email, el
+  * SELECT falla y aqui NO se loguea ni se lanza nada. Un e-CF sin correo se
+  * envia igual; lo unico que se pierde es que al cliente le llegue por correo.
+  * Si esto fuera un error duro, agregar la funcion romperia a todo ERP que no
+  * tenga la columna.
+  Function CargarCorreoCliente
+    Lparameters tcCodigo, tlEsGastos
+    Local lcSql, lcCod, lcRaw, lcTabla, lcCorreo
+    If Vartype(tcCodigo) # "C" Or Empty(Alltrim(tcCodigo))
+      Return ""
+    Endif
+    If !Used("curChalCli") Or Reccount("curChalCli") = 0
+      Return ""
+    Endif
+
+    lcCod = _ChalonaSqlQuote(Alltrim(tcCodigo))
+    lcTabla = Iif(tlEsGastos, "dbo.suplidor", "dbo.clientes")
+    lcRaw = "curChalCorreoRaw"
+    ChalonaEcfUseInIfUsed(lcRaw)
+
+    lcSql = "SELECT TOP 1 ISNULL(email, '') AS correo FROM " + lcTabla + ;
+      " WHERE codigo = " + lcCod
+    If !Request(lcSql, lcRaw)
+      * Sin columna email en este ERP. Silencio a proposito (ver arriba).
+      Return ""
+    Endif
+
+    lcCorreo = ""
+    If Used(lcRaw) And Reccount(lcRaw) > 0
+      Select (lcRaw)
+      Go Top
+      If Type("correo") # "U"
+        lcCorreo = Alltrim(Transform(Nvl(correo, "")))
+      Endif
+    Endif
+    ChalonaEcfUseInIfUsed(lcRaw)
+
+    * Solo lo que parece direccion. DGII tope 80 (CorreoValidationType) y
+    * mandar invalido produce rechazo 1424, asi que se descarta antes.
+    If At("@", lcCorreo) > 1 And Len(lcCorreo) <= 80
+      Select curChalCli
+      Go Top
+      Replace correo With lcCorreo
+    Endif
+
+    Select curChalCli
+    Return lcCorreo
   Endfunc
 
   Function _CargarReferenciaImtr
