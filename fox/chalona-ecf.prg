@@ -120,6 +120,20 @@ Function ChalonaEcfSaveUltimoJson
   Return
 Endfunc
 
+* Respuesta de excepcion no manejada, con el detalle tecnico adjunto.
+* ChalonaEcfLogException deja Proc/Line/Msg en gcChalonaEcfLastException;
+* sin esto el usuario ve "error.no_manejado" y soporte no tiene nada que leer.
+Function _ChalonaEcfRespNoManejado
+  Local loResp, loData
+  loResp = ChalonaResponseNew(.F., "error.no_manejado", "", "")
+  If Type("gcChalonaEcfLastException") = "C" And !Empty(Alltrim(Nvl(gcChalonaEcfLastException, "")))
+    loData = Createobject("Empty")
+    AddProperty(loData, "detail", gcChalonaEcfLastException)
+    loResp.data = loData
+  Endif
+  Return loResp
+Endfunc
+
 Function _ChalonaEcfLimpiaCadenaNumerica
   Lparameters tc
   Local lc, i, ln
@@ -1681,7 +1695,7 @@ Define Class ChalonaEcf As Custom
     Local lcUsuario, lcClave, lcPortal, lcBaseUrl
     Local lcDocJson, lcRncEmisor
     Local lcSendReq, loOut
-    Local loEx
+    Local loEx, loData
     Local loResp
     Local llVersionDesact
 
@@ -1800,7 +1814,7 @@ Define Class ChalonaEcf As Custom
       Enddo
     Catch To loEx
       ChalonaEcfLogException("UNHANDLED: Enviar", tcControl, loEx, "")
-      loResp = ChalonaResponseNew(.F., "error.no_manejado", "", "")
+      loResp = _ChalonaEcfRespNoManejado()
     Endtry
     * Adjuntar al objeto de error el JSON/cuerpo que se envio a envia_ecf (si ya se armo).
     If Vartype(loResp) = "O" ;
@@ -2427,10 +2441,10 @@ Define Class ChalonaEcf As Custom
   Endproc
 
   * HTTP POST JSON -> ChalonaResponse. Mismo patron que cliente ERP: MSXML2.XMLHTTP, open sync, send, responseText.
-  * Sin Try/Catch aqui (evita diferencias de runtime); sin filtrar status HTTP: el JSON trae ok true/false.
+  * Todo el ciclo COM va en Try/Catch; sin filtrar status HTTP: el JSON trae ok true/false.
   Procedure _HttpPostJson
     Lparameters tcUrl, tcBody, tcToken
-    Local loHttp, lcResp, lcT, lcBody, lnLastBrace
+    Local loHttp, lcResp, lcT, lcBody, lnLastBrace, loEx, lnReady
     * Inyectar cliente_tipo (identidad del remitente: este motor SIEMPRE es Fox)
     * + fox_version/fox_entorno cuando el loader los tiene (validacion de version).
     lcBody = Nvl(tcBody, "")
@@ -2449,25 +2463,37 @@ Define Class ChalonaEcf As Custom
       Endif
     Endif
     lcT = Alltrim(Nvl(tcToken, ""))
-    loHttp = Createobject("MSXML2.XMLHTTP")
-    loHttp.open("POST", tcUrl, .F.)
-    loHttp.setRequestHeader("Content-Type", "application/json")
-    If !Empty(lcT)
-      If Lower(Left(lcT, 7)) = "bearer "
-        loHttp.setRequestHeader("Authorization", lcT)
-      Else
-        loHttp.setRequestHeader("Authorization", "Bearer " + lcT)
-      Endif
-    Endif
-	TRY
-	    loHttp.send(lcBody)
-    CATCH WHEN .t.
-    ENDTRY
     lcResp = ""
-    If Vartype(loHttp.responseText) = "C"
-      lcResp = loHttp.responseText
-    Endif
     loHttp = .Null.
+    * Todo el ciclo COM va dentro del TRY: Createobject, open y responseText
+    * tambien lanzan (MSXML no registrado, URL invalida, o send fallido ->
+    * readyState<4 y leer responseText da error OLE). Sin esto la excepcion
+    * sube hasta Enviar/EnviarDesdeCursores y sale como "error.no_manejado"
+    * sin ningun detalle. No usar RETURN dentro del TRY (VFP 2060).
+    Try
+      loHttp = Createobject("MSXML2.XMLHTTP")
+      loHttp.open("POST", tcUrl, .F.)
+      loHttp.setRequestHeader("Content-Type", "application/json")
+      If !Empty(lcT)
+        If Lower(Left(lcT, 7)) = "bearer "
+          loHttp.setRequestHeader("Authorization", lcT)
+        Else
+          loHttp.setRequestHeader("Authorization", "Bearer " + lcT)
+        Endif
+      Endif
+      loHttp.send(lcBody)
+      lnReady = Int(Val(Transform(loHttp.readyState)))
+      If lnReady = 4 And Vartype(loHttp.responseText) = "C"
+        lcResp = loHttp.responseText
+      Endif
+    Catch To loEx
+      ChalonaEcfLogException("HTTP: _HttpPostJson", "", loEx, tcUrl)
+      lcResp = ""
+    Endtry
+    loHttp = .Null.
+    If Empty(lcResp)
+      Return ChalonaResponseNew(.F., "http.sin_respuesta", "", "")
+    Endif
     Return ChalonaResponseFromApiBody(lcResp)
   Endproc
 
@@ -2659,7 +2685,7 @@ Define Class ChalonaEcf As Custom
       Enddo
     Catch To loEx
       ChalonaEcfLogException("UNHANDLED: EnviarDesdeCursores", tcControl, loEx, "")
-      loResp = ChalonaResponseNew(.F., "error.no_manejado", "", "")
+      loResp = _ChalonaEcfRespNoManejado()
     Endtry
 
     If Vartype(loResp) = "O" ;
