@@ -123,6 +123,33 @@ Endfunc
 * Respuesta de excepcion no manejada, con el detalle tecnico adjunto.
 * ChalonaEcfLogException deja Proc/Line/Msg en gcChalonaEcfLastException;
 * sin esto el usuario ve "error.no_manejado" y soporte no tiene nada que leer.
+* Nombre de propiedad valido en VFP: primer caracter letra o "_", el resto
+* alfanumerico o "_". El servidor puede mandar claves JSON que no lo cumplen
+* (p.ej. empresa.apps.wms."funciona-como-deposito" en la sesion de login);
+* AddProperty las rechaza con error 1734 y sin esto se llevaba por delante
+* la respuesta entera -> "error.no_manejado" sin envio.
+Function _ChalonaNombrePropiedadVfp
+  Lparameters tcKey
+  Local lc, lcOut, i, c
+  lc = Alltrim(Nvl(tcKey, ""))
+  lcOut = ""
+  For i = 1 To Len(lc)
+    c = Substr(lc, i, 1)
+    If Isalpha(c) Or Isdigit(c) Or c == "_"
+      lcOut = lcOut + c
+    Else
+      lcOut = lcOut + "_"
+    Endif
+  Endfor
+  If Empty(lcOut)
+    Return ""
+  Endif
+  If Isdigit(Left(lcOut, 1))
+    lcOut = "_" + lcOut
+  Endif
+  Return Left(lcOut, 250)
+Endfunc
+
 Function _ChalonaEcfRespNoManejado
   Local loResp, loData
   loResp = ChalonaResponseNew(.F., "error.no_manejado", "", "")
@@ -4492,9 +4519,21 @@ Function _ChalonaJsonParseObject
       Loop
     Endif
 
+    * La clave viene del servidor: normalizarla antes de AddProperty. Un nombre
+    * invalido (guiones, espacios, acentos) lanza 1734 y tumba toda la respuesta.
+    lcKey = _ChalonaNombrePropiedadVfp(lcKey)
+    If Empty(lcKey)
+      Loop
+    Endif
+
     * Parsear valor recursivamente
     uVal = _ChalonaJsonParseValue(lcVal)
-    AddProperty(loObj, lcKey, uVal)
+    * Blindaje final: clave repetida (1480) o cualquier otro rechazo de
+    * AddProperty no puede costar la respuesta completa.
+    Try
+      AddProperty(loObj, lcKey, uVal)
+    Catch
+    Endtry
   Endfor
 
   Return loObj
