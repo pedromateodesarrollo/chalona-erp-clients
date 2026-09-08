@@ -1574,6 +1574,11 @@ Define Class ChalonaEcf As Custom
   Clave   = ""
   Portal  = ""
   Token   = ""
+  * Motivo del ultimo login fallido. _Login lo llena antes de vaciar Token, y
+  * _RespLoginFallo lo devuelve al llamador: sin esto "login.fallo" no dice si
+  * fue la clave, el portal, la red o un permiso del servidor.
+  LoginError = ""
+  LoginRaw   = ""
   * Objeto de configuración. Inyectable con SetConfig(). Si no se inyecta,
   * Init lo arma con ChalonaEcfConfigDesdeOsis() como default.
   * Debe exponer: servidor_ecf, usuario_sync, pass_sync, portal_dgii,
@@ -1648,17 +1653,22 @@ Define Class ChalonaEcf As Custom
   * Login en API: sistema_login -> Token
   Procedure _Login
     Local lcUsuario, lcClave, lcPortal, lcBaseUrl
-    Local lcLoginReq, loLogin, lcToken
+    Local lcLoginReq, loLogin, lcToken, lcCodigo
 
     lcUsuario = This.Usuario
     lcClave   = This.Clave
     lcPortal  = This._PortalActual()
 
+    This.LoginError = ""
+    This.LoginRaw   = ""
+
     If Empty(lcUsuario) Or Empty(lcClave)
+      This.LoginError = "usuario/clave vacios en la configuracion del ERP (usuario_sync/pass_sync)"
       This.Token = ""
       Return
     Endif
     If Empty(lcPortal)
+      This.LoginError = "portal vacio en la configuracion del ERP (portal_dgii)"
       This.Token = ""
       Return
     Endif
@@ -1676,17 +1686,46 @@ Define Class ChalonaEcf As Custom
 
     loLogin = This._HttpPostJson(lcBaseUrl + "sistema_login", lcLoginReq, "")
     If !loLogin.ok
+      * El servidor ya dijo por que (p.ej. "Sin empresa con acceso a esta
+      * aplicacion" / err.sistema_login.sin_empresa). Se conserva tal cual.
+      This.LoginError = Alltrim(Nvl(loLogin.message, ""))
+      * El codigo (err.sistema_login.sin_empresa, ...credenciales_invalidas, ...)
+      * es lo que permite ir directo a la causa; el texto es para el operador.
+      If Vartype(loLogin.data) = "O" And Pemstatus(loLogin.data, "message_code", 5)
+        lcCodigo = Alltrim(Transform(Nvl(loLogin.data.message_code, "")))
+        If !Empty(lcCodigo)
+          This.LoginError = Iif(Empty(This.LoginError), lcCodigo, This.LoginError + " [" + lcCodigo + "]")
+        Endif
+      Endif
+      If Empty(This.LoginError)
+        This.LoginError = "el servidor rechazo el login sin mensaje (" + Alltrim(lcBaseUrl) + "sistema_login)"
+      Endif
+      This.LoginRaw = Nvl(loLogin.rawBody, "")
       This.Token = ""
       Return
     Endif
 
     lcToken = Alltrim(Strextract(loLogin.rawBody, '"token":"', '"', 1, 3))
     If Empty(lcToken)
+      This.LoginError = "el servidor acepto el login pero no devolvio token"
+      This.LoginRaw = Nvl(loLogin.rawBody, "")
       This.Token = ""
       Return
     Endif
 
     This.Token = lcToken
+  Endproc
+
+  * Respuesta de login fallido con el motivo que _Login guardo. El mensaje va a
+  * imtr.respuesta_mensajes, que es varchar(254): se recorta para no perderlo
+  * entero en el truncado del ERP.
+  Procedure _RespLoginFallo
+    Local lcMsg
+    lcMsg = "login.fallo"
+    If !Empty(This.LoginError)
+      lcMsg = lcMsg + ": " + Left(Alltrim(This.LoginError), 200)
+    Endif
+    Return ChalonaResponseNew(.F., lcMsg, "", This.LoginRaw)
   Endproc
 
   * Al fallar Enviar: imtr.respuesta_mensajes (si hay control), MESSAGEBOX breve, form opcional.
@@ -1741,7 +1780,7 @@ Define Class ChalonaEcf As Custom
         This._Login()
         If Empty(This.Token)
           ChalonaEcfLogError("LOGIN: token vacÃ­o", tcControl, "")
-          loResp = ChalonaResponseNew(.F., "login.fallo", "", "")
+          loResp = This._RespLoginFallo()
           Exit
         Endif
 
@@ -1940,7 +1979,7 @@ Define Class ChalonaEcf As Custom
     * Hacer login (actualiza This.Token)
     This._Login()
     If Empty(This.Token)
-      Return ChalonaResponseNew(.F., "login.fallo", "", "")
+      Return This._RespLoginFallo()
     Endif
 
     lcBaseUrl = This.GetBaseUrl()
@@ -1987,7 +2026,7 @@ Define Class ChalonaEcf As Custom
 
     This._Login()
     If Empty(This.Token)
-      Return ChalonaResponseNew(.F., "login.fallo", "", "")
+      Return This._RespLoginFallo()
     Endif
 
     lcBaseUrl = This.GetBaseUrl()
@@ -2148,7 +2187,7 @@ Define Class ChalonaEcf As Custom
 
     This._Login()
     If Empty(This.Token)
-      Return ChalonaResponseNew(.F., "login.fallo", "", "")
+      Return This._RespLoginFallo()
     Endif
 
     lcBaseUrl = This.GetBaseUrl()
@@ -2411,7 +2450,7 @@ Define Class ChalonaEcf As Custom
 
     This._Login()
     If Empty(This.Token)
-      Return ChalonaResponseNew(.F., "login.fallo", "", "")
+      Return This._RespLoginFallo()
     Endif
 
     lcBaseUrl = This.GetBaseUrl()
@@ -2652,7 +2691,7 @@ Define Class ChalonaEcf As Custom
         This._Login()
         If Empty(This.Token)
           ChalonaEcfLogError("LOGIN: token vacio (cursores)", tcControl, "")
-          loResp = ChalonaResponseNew(.F., "login.fallo", "", "")
+          loResp = This._RespLoginFallo()
           Exit
         Endif
         lcUsuario = This.Usuario
