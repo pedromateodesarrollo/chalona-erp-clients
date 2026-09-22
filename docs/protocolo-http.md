@@ -52,14 +52,77 @@ Hay **dos formas de request** según el endpoint:
 2. **Cuerpo directo** (`envia_ecf`): sin envoltura `request`/`data`; los
    parámetros van al nivel raíz del cuerpo. El endpoint se toma del path.
 
-Autenticación: header `Authorization: Bearer <token>` en toda llamada que no sea
-el login.
+Autenticación: cabecera `Authorization: Bearer …` en toda llamada. Qué va ahí
+depende de cómo te autentiques — ver [Paso 1](#paso-1--autenticación): un token
+de cuenta de servicio (recomendado para un ERP) o el JWT que devuelve el login.
 
 ---
 
-## Paso 1 — Login
+## Paso 1 — Autenticación
 
-Obtené un token JWT.
+Hay dos formas de autenticarse. Las dos terminan igual: un valor en la cabecera
+`Authorization: Bearer …` de cada llamada, del que el servidor deriva usuario y
+empresa. En ningún caso mandés `session` en el cuerpo.
+
+| | Token de cuenta de servicio | Login con usuario y clave |
+|---|---|---|
+| Para | Integraciones máquina a máquina: tu ERP hablando con Chalona | Personas, pruebas a mano, herramientas interactivas |
+| Credencial | `cst_<selector>_<verificador>`, lo entrega el proveedor | Usuario y clave de una persona |
+| Login previo | No: el token **es** la credencial | Sí: `POST /sistema_login` devuelve un JWT |
+| Revocación | Inmediata, desde Chalona; el siguiente request ya falla | Quitando el acceso del usuario. Cambiar la clave **no** invalida un JWT ya emitido |
+| Expiración | Opcional, la fija quien lo emite | El JWT no caduca por sí solo |
+
+Para un ERP usá la cuenta de servicio. No depende de la clave de nadie, no hay
+que renovar nada y, si se filtra, se corta al instante sin tocar a los usuarios.
+
+### Opción A — token de cuenta de servicio (recomendada)
+
+La cuenta de servicio la crea el proveedor (Vicortiz) con
+`sistema_service_account_create`: una cuenta sin persona detrás, atada a tu
+empresa, con el perfil de envío de comprobantes. Al crearla se genera el token,
+que **se muestra una sola vez**: se te entrega por un canal seguro y no se puede
+volver a consultar. Si se pierde, se emite otro.
+
+```
+POST /envia_ecf
+Content-Type: application/json
+Authorization: Bearer cst_<selector>_<verificador>
+
+{ ...los parámetros del endpoint, sin "session"... }
+```
+
+- Va en **cada** request. No hay login previo ni sesión que renovar.
+- Guardalo como secreto (variable de entorno, vault). Nunca en el código, en el
+  repositorio ni en logs.
+- Es revocable al instante. Si se filtra, avisá a Vicortiz: lo revocan y emiten
+  otro.
+- Puede llevar fecha de caducidad, la fija quien lo emite.
+- El token identifica usuario **y** empresa. La sesión sale de la base de datos,
+  no del cuerpo: no hay forma de suplantar otra empresa.
+
+Errores propios de esta forma:
+
+| Código | Qué pasó |
+|---|---|
+| `err.sistema_token_login.token_invalido` | Token mal formado, revocado, expirado o inexistente |
+| `err.sistema_token_login.app_no_habilitada` | La cuenta existe pero no está habilitada para `ecf`; pedile al proveedor que la habilite |
+| `err.ejecutar.sin_acceso` | Sin cabecera `Authorization`, o la cuenta no tiene permiso sobre ese endpoint |
+
+Prueba de humo, sin certificado ni secuencias de por medio:
+
+```bash
+curl -s -X POST "https://ecf-service.vicortiz.com/consulta_estado" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"request":"consulta_estado","data":{"locale":"es","comprobantes":[]}}'
+# → {"ok":true,"message":"","data":{"result":[]}}
+```
+
+Si responde `token_invalido` o `sin_acceso`, el problema es la credencial, no tu
+integración.
+
+### Opción B — login con usuario y clave (JWT)
+
+Obtené un token JWT con las credenciales de un usuario de tu empresa.
 
 ```
 POST /sistema_login
@@ -86,14 +149,15 @@ Respuesta:
     "usuario": { "...": "..." },
     "empresa": { "...": "..." },
     "app": "ecf",
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    "token": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
   }
 }
 ```
 
-Guardá `data.token`. Lo mandás como `Authorization: Bearer <token>` en las
-llamadas siguientes. El token identifica usuario + empresa; no necesitás enviar
-`session` en el cuerpo — el servidor lo deriva del JWT.
+Guardá `data.token`. **Ya viene con el prefijo `Bearer `**: mandalo tal cual
+como valor de la cabecera `Authorization` en las llamadas siguientes (no le
+antepongas otro `Bearer`). El token identifica usuario + empresa; no necesitás
+enviar `session` en el cuerpo — el servidor lo deriva del JWT.
 
 > `app` es siempre `"ecf"` para este portal.
 
@@ -737,22 +801,25 @@ texto: rutéalo por el código.
 ```bash
 BASE="https://ecf-service.vicortiz.com"
 
-# 1. Login → token
-TOKEN=$(curl -s -X POST "$BASE/sistema_login" \
-  -H 'Content-Type: application/json' \
-  -d '{"request":"sistema_login","data":{"app":"ecf","locale":"es","usuario":"USER","clave":"PASS"}}' \
-  | jq -r '.data.token')
+# 1a. Cuenta de servicio (recomendado): el token viene del secreto, no del código
+AUTH="Bearer $CHALONA_ECF_TOKEN"        # CHALONA_ECF_TOKEN=cst_…
+
+# 1b. Alternativa: login → JWT (data.token ya trae el prefijo "Bearer ")
+# AUTH=$(curl -s -X POST "$BASE/sistema_login" \
+#   -H 'Content-Type: application/json' \
+#   -d '{"request":"sistema_login","data":{"app":"ecf","locale":"es","usuario":"USER","clave":"PASS"}}' \
+#   | jq -r '.data.token')
 
 # 2. Enviar comprobante (doc.json = { "locale":"es","rnc":"...","portal":"ecf","json":{...} })
 curl -s -X POST "$BASE/envia_ecf" \
   -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: $AUTH" \
   -d @doc.json | jq
 
 # 3. Consultar estado
 curl -s -X POST "$BASE/consulta_estado" \
   -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: $AUTH" \
   -d '{"request":"consulta_estado","data":{"locale":"es","comprobantes":["E310000000003"]}}' | jq
 ```
 
@@ -760,7 +827,9 @@ curl -s -X POST "$BASE/consulta_estado" \
 
 ## Checklist de integración
 
-1. [ ] Login funciona, guardás el token y lo reusás.
+1. [ ] Te autenticás: tenés el token de cuenta de servicio guardado como
+       secreto (o, si vas por login, guardás el JWT y lo reusás). La prueba de
+       humo de `consulta_estado` responde `ok:true`.
 2. [ ] Mapeás tus tablas (facturas, líneas, cliente) al JSON e-CF de arriba.
 3. [ ] Enviás un tipo 31 contra el entorno de pruebas y recibís `Aceptado`.
 4. [ ] Escribís `numero`, `estado`, `codigo_seguridad`, `fecha_firma`, `timbre`
