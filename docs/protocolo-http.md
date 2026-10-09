@@ -235,16 +235,16 @@ json
 │   │   ├── FechaVencimientoSecuencia  "dd-MM-yyyy"
 │   │   ├── IndicadorMontoGravado      "0"|"1"
 │   │   ├── IndicadorNotaCredito       "0"|"1"   (solo tipo 34)
-│   │   ├── TipoIngresos      "01".."06"
+│   │   ├── TipoIngresos      "01".."06"  (no va en 41)
 │   │   ├── TipoPago          "1"=Contado "2"=Crédito "3"=Gratuito
 │   │   └── TablaFormasPago   [ { FormaPago, MontoPago } ]  (opcional)
 │   ├── Emisor
 │   │   ├── RNCEmisor         (9 u 11 dígitos)
 │   │   ├── RazonSocialEmisor
-│   │   ├── DireccionEmisor   (máx 100 chars)
+│   │   ├── DireccionEmisor   (máx 100 chars; requerido salvo 32 RFCE)
 │   │   └── FechaEmision      "dd-MM-yyyy"  (requerido)
-│   ├── Comprador             (requerido en 31/33/34; opcional en 32 RFCE < 250k)
-│   │   ├── RNCComprador
+│   ├── Comprador             (requerido en 31/33/34/41; opcional en 32 RFCE < 250k)
+│   │   ├── RNCComprador      (en 41: la cédula o RNC de quien te vende)
 │   │   ├── RazonSocialComprador
 │   │   └── ...
 │   └── Totales
@@ -254,8 +254,8 @@ json
 │       ├── TotalITBIS
 │       ├── MontoExento
 │       ├── MontoTotal
-│       ├── TotalITBISRetenido    (obligatorio tipo 41 con retención)
-│       └── TotalISRRetencion     (obligatorio tipo 41 con retención)
+│       ├── TotalITBISRetenido    (tipo 41: siempre, aunque sea 0)
+│       └── TotalISRRetencion     (tipo 41: siempre, aunque sea 0)
 ├── DetallesItems             [ ...líneas... ]
 │   └── (cada ítem)
 │       ├── NumeroLinea       "1", "2", ...
@@ -265,7 +265,7 @@ json
 │       ├── CantidadItem
 │       ├── PrecioUnitarioItem
 │       ├── MontoItem
-│       └── Retencion         { IndicadorAgenteRetencionoPercepcion, MontoITBISRetenido, MontoISRRetenido }  (opcional)
+│       └── Retencion         { IndicadorAgenteRetencionoPercepcion, MontoITBISRetenido, MontoISRRetenido }  (obligatorio en 41 y 47; en los demás, opcional)
 ├── DescuentosORecargos       [ ... ]  (opcional)
 └── InformacionReferencia     (solo notas 33/34 — ver abajo)
 ```
@@ -351,6 +351,147 @@ Las **notas (33/34)** llevan al nivel raíz del `json`:
 
 > Los montos de una **nota de crédito (34)** no pueden exceder
 > `total de la factura + suma de notas de débito (33)`.
+
+El **41 (Compras)** tiene reglas propias: ver
+[Tipo 41](#tipo-41--compras-a-quien-no-te-da-comprobante).
+
+### Tipo 41 — Compras a quien no te da comprobante
+
+El 41 (Comprobante de Compras) lo emites **tú, que compras**, cuando le compras
+a alguien que no te da comprobante fiscal: una persona física no registrada o
+que no está obligada a emitir, como el dueño de una finca que te vende su
+cosecha. Con él la compra queda reportada a nombre de quien te vendió.
+
+Los papeles van al revés de una venta:
+
+| Bloque | Quién va ahí |
+|---|---|
+| `Emisor` | Tu empresa, la que compra |
+| `Comprador` | Quien te vende: el productor, con **su cédula** en `RNCComprador` |
+
+Lo que exige el 41 (XSD de la DGII y chequeos que corre el servidor antes de
+enviar):
+
+- **`RNCComprador` es obligatorio**: la cédula (11 dígitos) o el RNC de quien te
+  vendió. No admite `IdentificadorExtranjero` ni un «cliente genérico» sin
+  cédula: el 41 existe para decirle a la DGII a quién le pagaste. A quien no
+  tenga cédula no se le puede hacer un 41.
+- **`DireccionEmisor`** (la tuya) es obligatoria.
+- `FechaVencimientoSecuencia` y `TipoPago` son obligatorios. **`TipoIngresos` no
+  va** (si lo mandas, el servidor lo quita), ni `InformacionReferencia`.
+- **`MontoTotal` mayor que cero.** La DGII rechaza un 41 en cero (1960).
+- **Cada línea lleva el bloque `Retencion`**, aunque no retengas nada:
+  `IndicadorAgenteRetencionoPercepcion` en `"1"` (retención) o `"2"`
+  (percepción) —el `"0"` no existe en el 41—, más `MontoITBISRetenido` y
+  `MontoISRRetenido` (en `"0.00"` si no retienes).
+- **`TotalITBISRetenido` y `TotalISRRetencion` van siempre** en `Totales`, cada
+  uno igual a la suma de lo retenido en las líneas. Si no los mandas, el
+  servidor los pone en `0.00` (la DGII rechaza con 11160 si faltan).
+- `Totales` del 41 no lleva `MontoNoFacturable` ni `MontoImpuestoAdicional`: no
+  están en su XSD.
+- **La línea y los totales tienen que decir lo mismo.** Es el error más
+  repetido en el 41:
+
+  | `IndicadorFacturacion` de la línea | Su monto va en `Totales` |
+  |---|---|
+  | `"4"` Exento | `MontoExento` |
+  | `"3"` ITBIS tasa cero | `MontoGravadoI3` y `MontoGravadoTotal` |
+  | `"2"` ITBIS 16 % | `MontoGravadoI2` y `MontoGravadoTotal`, con `ITBIS2`, `TotalITBIS2` y `TotalITBIS` |
+  | `"1"` ITBIS 18 % | `MontoGravadoI1` y `MontoGravadoTotal`, con `ITBIS1`, `TotalITBIS1` y `TotalITBIS` |
+
+  Marcar la línea como tasa cero o gravada y poner el monto en `MontoExento` lo
+  rechaza la DGII. El servidor lo corta antes de enviar con
+  `ecf.total_detalle_no_coincide`, y el número no se gasta.
+
+Si el producto va **exento o con tasa cero**, y si a esa compra **le toca
+retención** de ITBIS o ISR, lo decide tu contador, no el formato: el servidor
+acepta cualquiera de las opciones mientras la línea y los totales cuadren.
+
+Ejemplo — compra de 10 cocos a un productor, exenta y sin retención:
+
+```json
+{
+  "Encabezado": {
+    "Version": "1.0",
+    "IdDoc": {
+      "TipoeCF": "41",
+      "eNCF": "E410000000001",
+      "FechaVencimientoSecuencia": "31-12-2027",
+      "IndicadorMontoGravado": "0",
+      "TipoPago": "1",
+      "TablaFormasPago": [{ "FormaPago": "1", "MontoPago": "300.00" }]
+    },
+    "Emisor": {
+      "RNCEmisor": "131996035",
+      "RazonSocialEmisor": "DOCUMENTOS ELECTRONICOS DE 02",
+      "DireccionEmisor": "AVE. ISABEL AGUIAR NO. 269, ZONA INDUSTRIAL DE HERRERA",
+      "FechaEmision": "09-10-2026"
+    },
+    "Comprador": {
+      "RNCComprador": "01800451302",
+      "RazonSocialComprador": "PRODUCTOR AGRICOLA DE PRUEBA"
+    },
+    "Totales": {
+      "MontoExento": "300.00",
+      "MontoTotal": "300.00",
+      "TotalITBISRetenido": "0.00",
+      "TotalISRRetencion": "0.00"
+    }
+  },
+  "DetallesItems": [
+    {
+      "NumeroLinea": "1",
+      "IndicadorFacturacion": "4",
+      "Retencion": {
+        "IndicadorAgenteRetencionoPercepcion": "1",
+        "MontoITBISRetenido": "0.00",
+        "MontoISRRetenido": "0.00"
+      },
+      "NombreItem": "COCO",
+      "IndicadorBienoServicio": "1",
+      "CantidadItem": "10.00",
+      "UnidadMedida": "43",
+      "PrecioUnitarioItem": "30.00",
+      "MontoItem": "300.00"
+    }
+  ]
+}
+```
+
+`UnidadMedida` es opcional (`"43"` = Unidad). Un servicio —por ejemplo, el
+secado que te hace una persona física— va con `IndicadorBienoServicio: "2"` y,
+si te toca retener, con los montos en `Retencion` y en los totales.
+
+Respuesta típica cuando la línea va en tasa cero (`"3"`) y el total en
+`MontoExento`:
+
+```json
+{
+  "ok": false,
+  "message": "Los totales no coinciden con el detalle en Encabezado.Totales.MontoGravadoI3.",
+  "data": {
+    "errors": [
+      {
+        "error": "ecf.total_detalle_no_coincide",
+        "path": "Encabezado.Totales.MontoGravadoI3",
+        "indicador": 3,
+        "sumaDetalle": 300.0,
+        "total": 0.0
+      },
+      {
+        "error": "ecf.total_detalle_no_coincide",
+        "path": "Encabezado.Totales.MontoExento",
+        "indicador": 4,
+        "sumaDetalle": 0.0,
+        "total": 300.0
+      }
+    ]
+  }
+}
+```
+
+Y sin la cédula del productor, `ecf.requerido` en
+`Encabezado.Comprador.RNCComprador`.
 
 ### Multimoneda — facturar en dólares (u otra divisa)
 
@@ -610,11 +751,10 @@ son los que más se facturan en divisa. En 46 las líneas van con
 ---
 
 Plantilla oficial de los 10 tipos (31, 32, 33, 34, 41, 43, 44, 45, 46, 47) —
-la misma que usa Chalona para certificación DGII:
-[`api/lib/src/ecf/fixtures/documentos_certificacion_dgii.json`](../../../api/lib/src/ecf/fixtures/documentos_certificacion_dgii.json)
-(en el repo `chalona-fsd`). Los clientes Python/Dart la embeben en su
-`demo_envio` — mirá `python-driver/bin/demo_envio.py` como referencia de los
-10 documentos completos.
+la misma que usa Chalona para certificación DGII: los clientes Python/Dart la
+embeben en su `demo_envio`. Mirá
+[`python-driver/bin/demo_envio.py`](../python-driver/bin/demo_envio.py) como
+referencia de los 10 documentos completos.
 
 ---
 
@@ -840,13 +980,16 @@ curl -s -X POST "$BASE/consulta_estado" \
        (`ecf_empresa_autorizacion_manual`).
 7. [ ] Si es manual: leés `ecf_recibido_list` con `pendientes:true` y llamás
        `ecf_recibido_aprobar` con la decisión.
-5. [ ] Manejás `estado != Aceptado` (reintento / consulta_estado / mostrar
+8. [ ] Manejás `estado != Aceptado` (reintento / consulta_estado / mostrar
        `estado_descripcion`).
-6. [ ] Cubrís notas (33/34) con `InformacionReferencia`.
-7. [ ] Si facturás en divisa, cubrís
-       [multimoneda](#multimoneda--facturar-en-dólares-u-otra-divisa)
-       (`OtraMoneda` + campos de línea).
-8. [ ] Probás los 10 tipos con la plantilla de certificación antes de producción.
+9. [ ] Cubrís notas (33/34) con `InformacionReferencia`.
+10. [ ] Si le compras a quien no te da comprobante (productores, personas
+        físicas), cubres el [tipo 41](#tipo-41--compras-a-quien-no-te-da-comprobante)
+        con la cédula de quien te vende.
+11. [ ] Si facturás en divisa, cubrís
+        [multimoneda](#multimoneda--facturar-en-dólares-u-otra-divisa)
+        (`OtraMoneda` + campos de línea).
+12. [ ] Probás los 10 tipos con la plantilla de certificación antes de producción.
 
 Para arrancar el mapeo con ayuda de un agente de IA, instalá la skill
 `driver-cliente` (ver [README](../README.md)) — te scaffoldea las queries
