@@ -38,7 +38,17 @@ publica una versión nueva.
 ## 1. Instalar el loader
 
 Copia `chalona-ecf-loader.prg` desde este repo a la instalación VFP del
-cliente.
+cliente y registralo **una sola vez** al arrancar el ERP (o compilalo dentro
+del `.exe`):
+
+```foxpro
+SET PROCEDURE TO chalona-ecf-loader.prg ADDITIVE
+```
+
+El loader es una biblioteca de funciones (`chalonaSetConfig`,
+`chalonaEnviaEcf`, …), no un programa: `DO chalona-ecf-loader.prg` no deja
+ninguna disponible. `ADDITIVE` conserva las bibliotecas que tu ERP ya tenga
+registradas.
 
 ## 2. Configurar (si tu ERP no usa `osis`)
 
@@ -46,8 +56,8 @@ ERPs sobre Vicortiz tienen un objeto público `osis` con `servidor_ecf`,
 `usuario_sync`, `pass_sync`, `portal_dgii`, `dgii_multimoneda`. El loader
 los lee automáticamente.
 
-Si tu ERP no tiene `osis`, llamá `chalonaSetConfig(loCfg)` antes de la
-primera invocación:
+Si tu ERP no tiene `osis`, llamá `chalonaSetConfig(loCfg)` después del
+`SET PROCEDURE` y antes de la primera invocación:
 
 ```foxpro
 LOCAL loCfg
@@ -62,9 +72,9 @@ chalonaSetConfig(loCfg)
 
 ## 3. Usar
 
-```foxpro
-DO chalona-ecf-loader.prg
+Con el loader ya registrado (paso 1):
 
+```foxpro
 * Enviar un comprobante por su control en dbo.imtr / dbo.gastos
 loResp = chalonaEnviaEcf("ABC1234")
 
@@ -138,7 +148,7 @@ la **capa de cursores**: tu código llena cursores VFP con shape rígido y
 el motor lee/reescribe ahí.
 
 ```foxpro
-DO chalona-ecf-loader.prg
+* (loader ya registrado con SET PROCEDURE, paso 1)
 
 * 1. Motor crea TODOS los cursores con shape rigido y vacios.
 goChalonaEcf.CrearCursores()
@@ -184,6 +194,9 @@ sobre DBF (no SQL Server) usando esta capa.
 [`chalona-ecf-integracion.html`](../fox/chalona-ecf-integracion.html)
 tiene la referencia completa de la API: funciones, parámetros, errores.
 
+Si tu ERP no va a usar el loader y prefiere llamar al server-ecf por HTTP
+directo, la guía es [`protocolo-http.md`](protocolo-http.md).
+
 ## Gotchas VFP
 
 - ⛔ **No usar `RETURN` dentro de bloques `TRY/CATCH`**: VFP no lo permite
@@ -205,8 +218,7 @@ fox/
     ├── alberto-ecf-cliente.prg      # cliente sobre DBF (capa cursores)
     ├── ecf.prg                      # ejemplo simple SQL Server
     ├── cncfe_basedata.prg           # helpers ejemplo
-    ├── cncfe_document.prg           # helpers ejemplo
-    └── manual-api-rest.html         # alternativa REST sin loader
+    └── cncfe_document.prg           # helpers ejemplo
 ```
 
 ---
