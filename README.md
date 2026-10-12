@@ -57,6 +57,7 @@ data.
 | [`python-driver/`](python-driver/) | Cliente Python — `.py` source via `exec()` en namespace aislado, stdlib only |
 | [`sql/`](sql/) | Schema Postgres standalone (tablas + funciones) |
 | [`docs/`](docs/) | Arquitectura, quickstarts, limitaciones |
+| [`whatsapp/`](whatsapp/) | **WhatsApp** — mandar texto y archivos (PDF de factura, fotos) desde el número de la empresa, estado del envío y respuestas: cliente FoxPro y API HTTP |
 | [`docs/protocolo-http.md`](docs/protocolo-http.md) | **Sin cliente** — contrato HTTP crudo para integrar en cualquier lenguaje (incluye [multimoneda / facturación en divisa](docs/protocolo-http.md#multimoneda--facturar-en-dólares-u-otra-divisa)) |
 
 ## Cómo empezar
