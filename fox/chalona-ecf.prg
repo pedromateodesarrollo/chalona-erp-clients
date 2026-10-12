@@ -1729,16 +1729,18 @@ Define Class ChalonaEcf As Custom
   Endproc
 
   * Al fallar Enviar: imtr.respuesta_mensajes (si hay control), MESSAGEBOX breve, form opcional.
+  * tlSinMensajes = .T. -> no muestra MESSAGEBOX ni formulario; el error igual se persiste.
   Procedure _EnviarFin
-    Lparameters loResp, tcControl
+    Lparameters loResp, tcControl, tlSinMensajes
     Local lcMsg, lcBox
+    tlSinMensajes = (Vartype(tlSinMensajes) = "L" And tlSinMensajes)
     If Vartype(loResp) = "O" ;
         And !loResp.ok ;
         And !Empty(Nvl(tcControl, ""))
       * Persistir mensaje de error en el documento (imtr o gastos).
       This._DocMarcaErrorEnvio(tcControl, loResp)
     Endif
-    If Vartype(loResp) = "O" And !loResp.ok And !_ChalonaEcfUiSilenciada()
+    If Vartype(loResp) = "O" And !loResp.ok And !tlSinMensajes And !_ChalonaEcfUiSilenciada()
       lcMsg = _ChalonaEcfMensajeErrorImtr(loResp)
       lcBox = lcMsg
       If !Empty(Nvl(tcControl, ""))
@@ -1749,6 +1751,7 @@ Define Class ChalonaEcf As Custom
     If This.MostrarFormularioError ;
         And Vartype(loResp) = "O" ;
         And !loResp.ok ;
+        And !tlSinMensajes ;
         And !_ChalonaEcfUiSilenciada()
       ChalonaMostrarErrorEnvioEcf(loResp, tcControl)
     Endif
@@ -1756,8 +1759,10 @@ Define Class ChalonaEcf As Custom
   Endproc
 
   * Enviar comprobante: usa This.Usuario/Clave/Portal y Token interno
+  * tlSinMensajes (opcional) = .T. -> si falla no muestra ningun mensaje de error;
+  * el error queda en el documento y en el ChalonaResponse devuelto.
   Procedure Enviar
-    Parameters tcControl
+    Parameters tcControl, tlSinMensajes
     Local lcUsuario, lcClave, lcPortal, lcBaseUrl
     Local lcDocJson, lcRncEmisor
     Local lcSendReq, loOut
@@ -1769,7 +1774,7 @@ Define Class ChalonaEcf As Custom
     llVersionDesact = .F.
     tcControl = Iif(Vartype(tcControl) = "C", Alltrim(tcControl), "")
     If Empty(tcControl)
-      Return This._EnviarFin(ChalonaResponseNew(.F., "control requerido", "", ""), tcControl)
+      Return This._EnviarFin(ChalonaResponseNew(.F., "control requerido", "", ""), tcControl, tlSinMensajes)
     Endif
 
     Try
@@ -1893,7 +1898,7 @@ Define Class ChalonaEcf As Custom
     If llVersionDesact
       Return loResp
     Endif
-    Return This._EnviarFin(loResp, tcControl)
+    Return This._EnviarFin(loResp, tcControl, tlSinMensajes)
   Endproc
 
   * Determinar origen del control: imtr / gastos / ambiguous / "".

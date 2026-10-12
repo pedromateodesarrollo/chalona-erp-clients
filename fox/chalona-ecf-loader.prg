@@ -39,19 +39,21 @@ Function chalonaVersionCliente
   Return gcChalonaFoxVersion
 Endfunc
 
-* chalonaEnviaEcf(tcControl) -> ChalonaResponse
+* chalonaEnviaEcf(tcControl [, tlSinMensajes]) -> ChalonaResponse
+* tlSinMensajes = .T. -> si falla no muestra ningun mensaje de error (el error
+* queda en el documento y en loResp). Por defecto .F.: muestra el error.
 Function chalonaEnviaEcf
-  Parameters tcControl
+  Parameters tcControl, tlSinMensajes
   If !_ChalonaLoaderInit()
-    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible", tlSinMensajes)
   Endif
   Local loResp
-  loResp = goChalonaEcf.Enviar(tcControl)
+  loResp = goChalonaEcf.Enviar(tcControl, tlSinMensajes)
   If _ChalonaLoaderEsVersionDesact(loResp)
     If _ChalonaLoaderDescargar()
-      loResp = goChalonaEcf.Enviar(tcControl)
+      loResp = goChalonaEcf.Enviar(tcControl, tlSinMensajes)
     Endif
-    If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderEsVersionDesact(loResp) And !(Vartype(tlSinMensajes) = "L" And tlSinMensajes)
       _ChalonaLoaderAvisoVersion()
     Endif
   Endif
@@ -432,15 +434,18 @@ Function _ChalonaLoaderEsVersionDesact
 Endfunc
 
 * Fallo rapido con ChalonaResponse minimo (sin depender del script descargado)
+* tlSinMensajes = .T. -> sin MESSAGEBOX.
 Function _ChalonaLoaderFail
-  Lparameters tcMessage
+  Lparameters tcMessage, tlSinMensajes
   Local lo, lcMsg, lcDetalle
   lcMsg = Nvl(tcMessage, "fox_cliente.error")
   lcDetalle = ""
   If Type("gcChalonaLoaderError") = "C" And !Empty(Nvl(gcChalonaLoaderError, ""))
     lcDetalle = Chr(13)+Chr(10) + gcChalonaLoaderError
   Endif
-  Messagebox(lcMsg + lcDetalle, 16, "Chalona ECF - Error al cargar script")
+  If !(Vartype(tlSinMensajes) = "L" And tlSinMensajes)
+    Messagebox(lcMsg + lcDetalle, 16, "Chalona ECF - Error al cargar script")
+  Endif
   lo = Createobject("Empty")
   AddProperty(lo, "ok", .F.)
   AddProperty(lo, "message", lcMsg)
