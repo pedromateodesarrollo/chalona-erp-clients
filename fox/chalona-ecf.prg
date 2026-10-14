@@ -3083,7 +3083,7 @@ Define Class ChalonaEcf As Custom
     Go Top
     Local lcFiscal, lcEncf, lcNcf, lcCtrlCol, ldFecha, lnValor, lnDesc, lnItbis
     Local lnTotal, lnTasa, lcMoneda, lcRnc, lcNombre, lcEntidad, lcOcontrol
-    Local ldFechaVenc, lnCodMod, lnItbisr, lnIsr, lnDiascr, lnPropina
+    Local ldFechaVenc, lnCodMod, lnItbisr, lnIsr, lnDiascr, lnPropina, lnDeducible
     Local lcComentario, lcReferencia, lcDoc, lcNumero
     lcFiscal     = Iif(Type("fiscal") # "U", Alltrim(Transform(Nvl(fiscal, ""))), "")
     lcEncf       = Iif(Type("encf") # "U", Alltrim(Transform(Nvl(encf, ""))), "")
@@ -3108,6 +3108,26 @@ Define Class ChalonaEcf As Custom
     lnItbisr     = Iif(Type("itbisr") # "U", _ChalonaEcfNzNum(itbisr), Iif(Type("itbir") # "U", _ChalonaEcfNzNum(itbir), 0))
     lnIsr        = Iif(Type("isr") # "U", _ChalonaEcfNzNum(isr), 0)
     lnPropina    = Iif(Type("propina") # "U", _ChalonaEcfNzNum(propina), 0)
+    * Deducible de seguro (talleres que facturan a la aseguradora): lo que pago el
+    * asegurado aparte se RESTA de la factura de la aseguradora. El ERP lo guarda
+    * en imtr.otros (no en descuento) y ya calcula el ITBIS de cada linea sobre la
+    * base reducida: sin tomarlo, el detalle sale sin descuento contra un ITBIS ya
+    * reducido y el validador rechaza 11014 (caso real E310000000015, 14-oct-2026:
+    * bruto 105500, deducible 8474.60, ITBIS 17464.57, total 114489.97). Para el
+    * motor es descuento de cabecera.
+    * "otros" es generico: en los demas clientes del ERP es un cargo que SE SUMA
+    * al total; solo en este caso resta (Victor, 14-oct). Se mira el monto sin
+    * signo y solo cuenta como deducible si el ERP confirma las DOS cosas: que el
+    * total lo resto (total = valor - descuento - deducible + itbis + propina) y que el
+    * ITBIS se calculo sobre la base sin el (18%). Un cargo, una retencion o algo
+    * con exento/16% no cuadra y el documento sale igual que antes. Sin la
+    * columna, tampoco cambia nada.
+    lnDeducible  = Iif(Type("otros") # "U", Abs(_ChalonaEcfNzNum(otros)), 0)
+    If lnDeducible > 1 ;
+        And Abs(lnValor - lnDesc - lnDeducible + lnItbis + lnPropina - lnTotal) <= 1 ;
+        And Abs(Round((lnValor - lnDesc - lnDeducible) * 0.18, 2) - lnItbis) <= 1
+      lnDesc = lnDesc + lnDeducible
+    Endif
     lnDiascr     = Iif(Type("diascr") # "U", _ChalonaEcfNzNum(diascr), 0)
     lcComentario = Iif(Type("comentario") # "U", Alltrim(Transform(Nvl(comentario, ""))), "")
     lcReferencia = Iif(Type("referencia") # "U", Alltrim(Transform(Nvl(referencia, ""))), "")
