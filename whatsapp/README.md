@@ -9,6 +9,12 @@ corre en una PC de tu oficina (como WhatsApp Web). Los mensajes salen de ahí. T
 sistema no habla con el agente: habla con el API, que pone cada mensaje en la cola
 de ese número.
 
+Una empresa puede tener **varios números** (en una misma PC o en varias), cada uno
+con su cola, sus topes y sus respuestas. Cada envío dice por cuál número sale
+(`desde`, el número de origen). Si la empresa tiene un solo número no hace falta
+decirlo; si tiene varios y no se dice, el envío se rechaza con
+`whatsapp.desde_requerido` y la lista de los números: nunca se adivina.
+
 | | |
 |---|---|
 | Servidor | `https://whatsapp.chalonasoft.com/api/` |
@@ -19,8 +25,8 @@ de ese número.
 ## Antes de empezar
 
 1. **El agente instalado y el número vinculado.** Lo ves en la página
-   `https://whatsapp.chalonasoft.com` (Agentes: «conectado» y «vinculado»), o con
-   `Agentes()` desde Fox.
+   `https://whatsapp.chalonasoft.com` (Números: «Listo»), o con `Numeros()` desde
+   Fox.
 2. **Un token de cuenta de servicio** (`cst_…`) de tu empresa, con el perfil
    «Envíos» de WhatsApp. Te lo da tu proveedor. Es una credencial: va en la
    configuración del sistema, nunca en el código ni en un correo.
@@ -38,6 +44,12 @@ loR = loWa.EnviarTexto("8095551234", "Buenos días, Juan. Su balance es RD$ 12,5
 * Un PDF, con el texto de pie
 loR = loWa.EnviarArchivo("8095551234", "C:\facturas\FT-000123.pdf", "Su factura FT-000123", "FT-000123")
 
+* Con varios números: por cuál sale (el último parámetro)...
+loR = loWa.EnviarTexto("8095551234", "Su balance es RD$ 12,500.00.", "EC-2026-10-C0045", "18295550000")
+loR = loWa.EnviarArchivo("8095551234", "C:\facturas\FT-000123.pdf", "Su factura", "FT-000123", "", "18295550000")
+* ...o para todos los envíos de este objeto:
+loWa.Desde = "18295550000"
+
 If !loR.ok
   Messagebox(loR.mensaje, 16, "WhatsApp")    && el error ya viene en español
 Else
@@ -53,17 +65,19 @@ se quitan solos.
 
 | Método | Qué hace |
 |---|---|
-| `EnviarTexto(numero, texto, [control])` | Pone un texto en la cola. |
-| `EnviarArchivo(numero, ruta, [texto], [control], [nombre])` | Pone un archivo en la cola, con `texto` de pie. Fotos (jpg, png, webp) salen como imagen; lo demás como documento con su nombre. `nombre` cambia el que ve el cliente. Hasta 10 MB desde Fox. |
-| `Estado(id)` / `EstadoPorControl(control)` | Cómo va un envío (`.estado`, `.registro`). |
-| `Mensajes([numero], [estado], [desde], [hasta], [limite], [saltar])` | Lo enviado, del más nuevo al más viejo (`.lista`, `.total`). Fechas ISO: `"2026-10-01"`. |
+| `EnviarTexto(numero, texto, [control], [desde])` | Pone un texto en la cola. `desde`: el número de la empresa por el que sale (obligatorio si tiene varios). |
+| `EnviarArchivo(numero, ruta, [texto], [control], [nombre], [desde])` | Pone un archivo en la cola, con `texto` de pie. Fotos (jpg, png, webp) salen como imagen; lo demás como documento con su nombre. `nombre` cambia el que ve el cliente. Hasta 10 MB desde Fox. |
+| `Estado(id)` / `EstadoPorControl(control)` | Cómo va un envío (`.estado`, `.desde` = por cuál número salió, `.registro`). |
+| `Mensajes([numero], [estado], [desde], [hasta], [limite], [saltar], [por_numero])` | Lo enviado, del más nuevo al más viejo (`.lista`, `.total`); cada uno con `.desde`. Fechas ISO: `"2026-10-01"`. `por_numero`: solo lo que salió por ese número de la empresa. |
 | `Cancelar(id)` | Cancela un envío que todavía está `pendiente`. |
-| `Respuestas([despues_de], [numero], [limite])` | Lo que te contestaron (`.lista`, `.ultimo_id`). |
-| `RespuestasACursor(cursor, [despues_de], [numero], [limite])` | Igual, en un cursor `(id, de, nombre, texto, tipo, hora, agente)`. |
-| `Agentes()` | Los números de la empresa y cómo están (`.lista`). |
+| `Respuestas([despues_de], [numero], [limite], [para])` | Lo que te contestaron (`.lista`, `.ultimo_id`); cada una con `.para` = a cuál número de la empresa llegó. |
+| `RespuestasACursor(cursor, [despues_de], [numero], [limite], [para])` | Igual, en un cursor `(id, de, nombre, texto, tipo, hora, agente, para, linea)`. |
+| `Numeros()` | Los números de la empresa y cómo están (`.lista`: `numero`, `nombre`, `vinculado`, `conectado`, lo de hoy). |
+| `Agentes()` | Las PC (agentes) de la empresa, cada una con sus números. |
 
-Propiedades: `Token`, `BaseUrl`, `Agente` (si la empresa tiene varios números, el id
-del que quieres usar; 0 = el único), `ComponenteHttp` (por defecto
+Propiedades: `Token`, `BaseUrl`, `Desde` (el número de origen para todos los envíos
+del objeto, si no se pasa en cada uno; vacío = el único de la empresa), `Agente`
+(de la versión 1.0: vale si ese agente tiene un solo número), `ComponenteHttp` (por defecto
 `MSXML2.XMLHTTP`, el mismo del cliente ECF), `UltimaPeticion` (el JSON de la
 última llamada, sin el base64, para tu log).
 
@@ -131,7 +145,8 @@ Nada a grupos: solo números.
 | `whatsapp.archivo_invalido` / `whatsapp.archivo_muy_grande` | Archivo sin nombre, base64 roto, o más de 16 MB. |
 | `archivo.no_existe` / `archivo.muy_grande` / `archivo.vacio` / `archivo.no_se_pudo_leer` | Lo detecta el `.prg` antes de mandar. |
 | `whatsapp.sin_agente` / `whatsapp.sin_vincular` | La empresa no tiene agente activo o no ha vinculado el número. |
-| `whatsapp.agente_requerido` | Hay varios números: pon `loWa.Agente`. |
+| `whatsapp.desde_requerido` | La empresa tiene varios números y no dijiste por cuál sale: pasa `desde` o pon `loWa.Desde`. El mensaje trae la lista. |
+| `whatsapp.desde_no_encontrado` | Ese `desde` no es un número activo de la empresa (el mensaje trae los que hay). |
 | `whatsapp.tope_dia` / `whatsapp.tope_nuevos` / `whatsapp.mismo_texto` | Frenos (arriba). |
 | `whatsapp.no_cancelable` | Ya salió o no existe. |
 | `whatsapp.mensaje_no_encontrado` | `Estado` de un id o control que no existe. |
@@ -183,11 +198,12 @@ curl https://whatsapp.chalonasoft.com/api/whatsapp_enviar \
 
 | Endpoint | Parámetros |
 |---|---|
-| `whatsapp_enviar` | `a`, `texto`, `archivo {nombre, mime, data}`, `control`, `agente` |
-| `whatsapp_mensaje_select` | `id`, `control`, `a`, `estado`, `agente`, `desde`, `hasta`, `limit` (≤ 200), `offset` → `result[]`, `total` |
+| `whatsapp_enviar` | `a`, `desde` (número de origen; o `linea`, su id), `texto`, `archivo {nombre, mime, data}`, `control` |
+| `whatsapp_mensaje_select` | `id`, `control`, `a`, `estado`, `desde` y `hasta` (fechas), `desde_numero` o `linea` (por cuál salió), `limit` (≤ 200), `offset` → `result[]` (con `desde`, `linea`), `total` |
 | `whatsapp_mensaje_cancelar` | `id` |
-| `whatsapp_recibido_select` | `despues_de`, `de`, `agente`, `limit`, `offset` → `result[]` (`id, agente, de, nombre, texto, tipo, hora`), `total` |
-| `whatsapp_agente_select` | `id` → `result[]` |
+| `whatsapp_recibido_select` | `despues_de`, `de`, `para` o `linea` (a cuál número llegó), `limit`, `offset` → `result[]` (`id, linea, para, de, nombre, texto, tipo, hora`), `total` |
+| `whatsapp_linea_select` | `id`, `agente` → `result[]` (los números: `id, numero, nombre, vinculado, conectado, frenos, hoy`) |
+| `whatsapp_agente_select` | `id` → `result[]` (las PC, con sus `lineas`) |
 
 Toda respuesta es `{ok, message, data}`. Con `"locale":"es"`, si `ok` es `false`,
 `message` trae el error en español y `data.message_code` el código.

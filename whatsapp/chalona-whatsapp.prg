@@ -11,6 +11,14 @@
 *   loWa = Createobject("ChalonaWhatsapp", "cst_...")   && token de la cuenta de servicio
 *   loR  = loWa.EnviarArchivo("8095551234", "C:\facturas\FT-000123.pdf", ;
 *            "Le enviamos su factura FT-000123.", "FT-000123")
+*
+* Si la empresa tiene VARIOS numeros de WhatsApp, cada envio dice por cual
+* sale (el numero de origen, con codigo de pais): el ultimo parametro de
+* EnviarTexto / EnviarArchivo / Enviar, o la propiedad loWa.Desde para todos:
+*   loWa.Desde = "18295550000"
+*   loR = loWa.EnviarTexto("8095551234", "Hola", "FT-000123", "18295550000")
+* Con un solo numero no hace falta. Con varios y sin decirlo, el envio se
+* rechaza (whatsapp.desde_requerido) con la lista de los numeros.
 *   If !loR.ok
 *     Messagebox(loR.mensaje, 16, "WhatsApp")
 *   Endif
@@ -28,7 +36,7 @@
 *     Windows y un acento en UTF-8 sale como basura en los mensajes.
 *------------------------------------------------------------
 
-#Define CHALONA_WA_VERSION   "1.0.0"
+#Define CHALONA_WA_VERSION   "1.1.0"
 #Define CHALONA_WA_URL       "https://whatsapp.chalonasoft.com/api/"
 * El servidor acepta hasta 16 MB, pero el archivo viaja en base64 dentro de un
 * texto de VFP, que no pasa con seguridad de ~16 millones de caracteres.
@@ -38,8 +46,13 @@ Define Class ChalonaWhatsapp As Custom
 
   BaseUrl = CHALONA_WA_URL
   Token   = ""
-  * Agente (numero vinculado) por el que sale. 0 = el unico activo de la empresa;
-  * si la empresa tiene mas de uno, hay que decir cual (ver Agentes()).
+  * Numero de la empresa por el que salen los envios (el de origen, con codigo
+  * de pais, p.ej. "18295550000"). Vacio = el unico que tenga la empresa; si
+  * tiene varios, hay que decir cual (aqui o en el ultimo parametro de cada
+  * envio; ver Numeros()).
+  Desde   = ""
+  * (Version 1.0) Agente por el que sale. Sigue valiendo si ese agente tiene un
+  * solo numero; con varios, usa Desde.
   Agente  = 0
   * Componente HTTP. MSXML2.XMLHTTP usa la configuracion de internet de
   * Windows (la misma del cliente ECF). En un servidor sin IE configurado
@@ -68,25 +81,27 @@ Define Class ChalonaWhatsapp As Custom
   * Asi un reintento tras un corte de red no le llega dos veces al cliente.
   *----------------------------------------------------------
 
+  * tcDesde (opcional): numero de la empresa por el que sale (ver Desde).
   Function EnviarTexto
-    Lparameters tcNumero, tcTexto, tcControl
-    Return This.Enviar(tcNumero, tcTexto, "", tcControl)
+    Lparameters tcNumero, tcTexto, tcControl, tcDesde
+    Return This.Enviar(tcNumero, tcTexto, "", tcControl, "", "", tcDesde)
   Endfunc
 
   * tcRuta: archivo en disco. tcTexto va como pie del archivo (puede ir vacio).
   * tcNombre: nombre con que lo ve el cliente (por defecto, el del archivo).
   * Fotos (jpg, png, webp) salen como imagen; lo demas, como documento.
   Function EnviarArchivo
-    Lparameters tcNumero, tcRuta, tcTexto, tcControl, tcNombre
-    Return This.Enviar(tcNumero, tcTexto, tcRuta, tcControl, tcNombre)
+    Lparameters tcNumero, tcRuta, tcTexto, tcControl, tcNombre, tcDesde
+    Return This.Enviar(tcNumero, tcTexto, tcRuta, tcControl, tcNombre, "", tcDesde)
   Endfunc
 
   Function Enviar
-    Lparameters tcNumero, tcTexto, tcRuta, tcControl, tcNombre, tcMime
+    Lparameters tcNumero, tcTexto, tcRuta, tcControl, tcNombre, tcMime, tcDesde
     Local lcNumero, lcTexto, lcRuta, lcNombre, lcMime, lcBase64, lcCuerpo, lcLog
-    Local lcErr, lnBytes, loEx, loR, laArch[1]
+    Local lcErr, lnBytes, loEx, loR, laArch[1], lcDesde
 
     lcNumero = _ChalonaWaNumero(tcNumero)
+    lcDesde  = _ChalonaWaNumero(Iif(Vartype(tcDesde) = "C" And !Empty(tcDesde), tcDesde, This.Desde))
     lcTexto  = Iif(Vartype(tcTexto) = "C", Alltrim(tcTexto), "")
     lcRuta   = Iif(Vartype(tcRuta) = "C", Alltrim(tcRuta), "")
     lcBase64 = ""
@@ -138,6 +153,9 @@ Define Class ChalonaWhatsapp As Custom
     If Vartype(tcControl) = "C" And !Empty(tcControl)
       lcCuerpo = lcCuerpo + ',"control":"' + ChalonaWaJsonTexto(Alltrim(tcControl)) + '"'
     Endif
+    If !Empty(lcDesde)
+      lcCuerpo = lcCuerpo + ',"desde":"' + lcDesde + '"'
+    Endif
     If This.Agente > 0
       lcCuerpo = lcCuerpo + ',"agente":' + Transform(Int(This.Agente))
     Endif
@@ -160,6 +178,7 @@ Define Class ChalonaWhatsapp As Custom
 
   *----------------------------------------------------------
   * Estado de un envio: por el id que devolvio Enviar, o por tu control.
+  * .desde: el numero de la empresa por el que salio (o sale).
   * .estado: pendiente | enviando | enviado | fallido | incierto | cancelado
   *   fallido  = no salio (.registro.error dice por que: sin_whatsapp = ese
   *              numero no tiene WhatsApp; whatsapp_desconectado = la PC del
@@ -185,13 +204,16 @@ Define Class ChalonaWhatsapp As Custom
 
   * Lo enviado, del mas nuevo al mas viejo. Todos los filtros son opcionales.
   * tcDesde/tcHasta: fecha ISO, p.ej. "2026-10-01". .lista = Collection.
+  * tcPorNumero: solo lo que salio por ese numero de la empresa. Cada mensaje
+  * trae .desde (por cual salio).
   Function Mensajes
-    Lparameters tcNumero, tcEstado, tcDesde, tcHasta, tnLimite, tnSaltar
+    Lparameters tcNumero, tcEstado, tcDesde, tcHasta, tnLimite, tnSaltar, tcPorNumero
     Local lcCuerpo, loR
     lcCuerpo = '{"limit":' + Transform(Iif(Vartype(tnLimite) = "N" And tnLimite > 0, Int(tnLimite), 50)) + ;
       ',"offset":' + Transform(Iif(Vartype(tnSaltar) = "N", Int(tnSaltar), 0))
     lcCuerpo = lcCuerpo + _ChalonaWaParam("a", _ChalonaWaNumero(tcNumero)) + _ChalonaWaParam("estado", tcEstado) + ;
-      _ChalonaWaParam("desde", tcDesde) + _ChalonaWaParam("hasta", tcHasta)
+      _ChalonaWaParam("desde", tcDesde) + _ChalonaWaParam("hasta", tcHasta) + ;
+      _ChalonaWaParam("desde_numero", _ChalonaWaNumero(tcPorNumero))
     If This.Agente > 0
       lcCuerpo = lcCuerpo + ',"agente":' + Transform(Int(This.Agente))
     Endif
@@ -217,15 +239,18 @@ Define Class ChalonaWhatsapp As Custom
   * la siguiente llamada (0 = las mas recientes). Vienen de la mas nueva a la
   * mas vieja; con tnDespuesDe son las tnLimite MAS VIEJAS despues de ese id,
   * asi que repitiendo hasta que .lista venga vacia no se salta ninguna.
+  * Cada respuesta trae .para: el numero de la empresa al que llego.
+  * tcPara (opcional): solo las que llegaron a ese numero de la empresa.
   *----------------------------------------------------------
   Function Respuestas
-    Lparameters tnDespuesDe, tcNumero, tnLimite
+    Lparameters tnDespuesDe, tcNumero, tnLimite, tcPara
     Local lcCuerpo, loR, loItem
     lcCuerpo = '{"limit":' + Transform(Iif(Vartype(tnLimite) = "N" And tnLimite > 0, Int(tnLimite), 50))
     If Vartype(tnDespuesDe) = "N" And tnDespuesDe > 0
       lcCuerpo = lcCuerpo + ',"despues_de":' + Transform(Int(tnDespuesDe))
     Endif
-    lcCuerpo = lcCuerpo + _ChalonaWaParam("de", _ChalonaWaNumero(tcNumero))
+    lcCuerpo = lcCuerpo + _ChalonaWaParam("de", _ChalonaWaNumero(tcNumero)) + ;
+      _ChalonaWaParam("para", _ChalonaWaNumero(tcPara))
     If This.Agente > 0
       lcCuerpo = lcCuerpo + ',"agente":' + Transform(Int(This.Agente))
     Endif
@@ -242,26 +267,37 @@ Define Class ChalonaWhatsapp As Custom
     Return loR
   Endfunc
 
-  * Lo mismo que Respuestas, en un cursor (id, de, nombre, texto, tipo, hora).
+  * Lo mismo que Respuestas, en un cursor (id, de, nombre, texto, tipo, hora,
+  * agente, para, linea); para = el numero de la empresa al que llego.
   Function RespuestasACursor
-    Lparameters tcCursor, tnDespuesDe, tcNumero, tnLimite
+    Lparameters tcCursor, tnDespuesDe, tcNumero, tnLimite, tcPara
     Local loR, loItem
-    loR = This.Respuestas(tnDespuesDe, tcNumero, tnLimite)
-    Create Cursor (tcCursor) (id I, de C(20), nombre C(120), texto M, tipo C(20), hora C(32), agente I)
+    loR = This.Respuestas(tnDespuesDe, tcNumero, tnLimite, tcPara)
+    Create Cursor (tcCursor) (id I, de C(20), nombre C(120), texto M, tipo C(20), hora C(32), agente I, ;
+      para C(20), linea I)
     If loR.ok And !Isnull(loR.lista)
       For Each loItem In loR.lista
-        Insert Into (tcCursor) (id, de, nombre, texto, tipo, hora, agente) Values ( ;
+        Insert Into (tcCursor) (id, de, nombre, texto, tipo, hora, agente, para, linea) Values ( ;
           _ChalonaWaProp(loItem, "id", 0), _ChalonaWaProp(loItem, "de", ""), _ChalonaWaProp(loItem, "nombre", ""), ;
           _ChalonaWaProp(loItem, "texto", ""), _ChalonaWaProp(loItem, "tipo", ""), _ChalonaWaProp(loItem, "hora", ""), ;
-          _ChalonaWaProp(loItem, "agente", 0))
+          _ChalonaWaProp(loItem, "agente", 0), _ChalonaWaProp(loItem, "para", ""), _ChalonaWaProp(loItem, "linea", 0))
       Endfor
       Go Top In (tcCursor)
     Endif
     Return loR
   Endfunc
 
-  * Los agentes (numeros vinculados) de la empresa: id, nombre, numero,
-  * conectado, vinculado y lo de hoy (enviados, en cola, fallidos).
+  * Los numeros de la empresa: id, nombre, numero (el que va en Desde),
+  * vinculado, conectado, predeterminada, agente, agente_nombre, frenos y lo de
+  * hoy (enviados, en cola, fallidos). .lista = Collection.
+  Function Numeros
+    Local loR
+    loR = This._Post("whatsapp_linea_select", '{}')
+    This._LlenarLista(loR)
+    Return loR
+  Endfunc
+
+  * Los agentes (las PC) de la empresa, cada uno con sus numeros (.lineas).
   Function Agentes
     Local loR
     loR = This._Post("whatsapp_agente_select", '{}')
@@ -340,6 +376,7 @@ Define Class ChalonaWhatsapp As Custom
       loR.registro = loRes
       loR.id = _ChalonaWaProp(loRes, "id", 0)
       loR.estado = _ChalonaWaProp(loRes, "estado", "")
+      loR.desde = _ChalonaWaProp(loRes, "desde", "")
     Endif
     If Pemstatus(loR.data, "repetido", 5)
       loR.repetido = (loR.data.repetido = .T.)
@@ -368,8 +405,9 @@ Enddefine
 *   data      lo que devolvio el servidor, como objeto (Empty / Collection)
 *   registro  el mensaje (en Enviar, Estado, Cancelar)
 *   id, estado
+*   desde     el numero de la empresa por el que salio el mensaje
 *   repetido  .T. si el control ya existia y no se mando otra vez
-*   lista     Collection (Mensajes, Respuestas, Agentes)
+*   lista     Collection (Mensajes, Respuestas, Numeros, Agentes)
 *   total, ultimo_id
 *   http_status, crudo (el JSON tal como llego)
 *------------------------------------------------------------
@@ -381,6 +419,7 @@ Define Class ChalonaWaRespuesta As Custom
   registro    = .Null.
   id          = 0
   estado      = ""
+  desde       = ""
   repetido    = .F.
   lista       = .Null.
   total       = 0

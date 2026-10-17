@@ -3,24 +3,30 @@
 *
 *   DO ejemplo-whatsapp.prg WITH "cst_...", "18095551234", "C:\facturas\FT-000123.pdf"
 *
+* Si la empresa tiene varios numeros de WhatsApp, el cuarto parametro dice
+* por cual sale (el numero de origen):
+*   DO ejemplo-whatsapp.prg WITH "cst_...", "18095551234", "C:\facturas\FT-000123.pdf", "18295550000"
+*
 * Pruebelo primero mandandose el mensaje a su propio numero.
 *------------------------------------------------------------
-Lparameters tcToken, tcNumero, tcPdf
+Lparameters tcToken, tcNumero, tcPdf, tcDesde
 
 Local loWa, loR, lnI, loItem
 
 Set Procedure To chalona-whatsapp.prg Additive
 
 loWa = Createobject("ChalonaWhatsapp", tcToken)
+* Por cual numero de la empresa salen los envios (vacio = el unico que tiene).
+loWa.Desde = Iif(Vartype(tcDesde) = "C", tcDesde, "")
 
-* 1. El numero de la empresa (agente): conectado y vinculado.
-loR = loWa.Agentes()
+* 1. Los numeros de la empresa: vinculados y conectados.
+loR = loWa.Numeros()
 If !loR.ok
   Messagebox(loR.mensaje, 16, "WhatsApp")
   Return
 Endif
 For Each loItem In loR.lista
-  ? "Agente", loItem.id, loItem.nombre, loItem.numero, ;
+  ? "Numero", loItem.id, loItem.nombre, loItem.numero, ;
     Iif(loItem.conectado, "conectado", "DESCONECTADO"), Iif(loItem.vinculado, "vinculado", "SIN VINCULAR")
 Endfor
 
