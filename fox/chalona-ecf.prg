@@ -623,6 +623,10 @@ Function ChalonaEcfBuildDocJsonFox
       Endif
     Endif
     ChalonaEcfUseInIfUsed("curChalSup")
+    * Al cerrar curChalSup el area activa deja de ser el maestro: sin volver a el, fechavencencf (y todo campo
+    * leido sin alias mas abajo) no se encuentra y el gasto sin RNC sale con ecf.iddoc.fecha_vencimiento_requerida.
+    Select curChalMae
+    Go Top
   Endif
 
   * FechaVencimientoSecuencia (IdDoc): 1) imtr.fechavencencf si tiene valor; 2) si no, fiscal.vence por tipo.
