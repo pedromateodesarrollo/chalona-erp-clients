@@ -432,7 +432,7 @@ Function ChalonaEcfBuildDocJsonFox
   Local lcTipoeCF, lcEncf, ldFecEmi, lnDiasCr, lnValor, lnDescMae, lnItbis, lnTotal
   Local lcMaeRnc, lcMaeNombre, lcEntidad, lcOcontrol, lcMaeCorreo
   Local ldFecVen, lcFecVen, lcEmpRnc, lcEmpNom, lcEmpDir, lnExtranjero
-  Local lcRefEncf, ldRefFec, lcInfRef, lcIdDoc, lcEmisor, lcComp, lcTot
+  Local lcRefEncf, lcRefPapel, ldRefFec, lcInfRef, lcIdDoc, lcEmisor, lcComp, lcTot
   Local lnP, lnC, lnBruto, lnDescLin, lnMontoItem, lcNomItem, lcDescItem, lnIndBS
   Local lcSubDesc, lcFLP, lnTipoPago, lnItbis1
   Local loEx
@@ -737,6 +737,14 @@ Function ChalonaEcfBuildDocJsonFox
         Select curChalRef
         Go Top
         lcRefEncf = Alltrim(Transform(Nvl(encf, "")))
+        * Factura de papel (sin e-NCF, anterior al e-CF): su número B01/B02/B14/B15 de 11 dígitos
+        * es el NCFModificado válido (Informe Técnico e-CF v1.0, nota 44).
+        If Empty(lcRefEncf)
+          lcRefPapel = Alltrim(Transform(Nvl(ncf, "")))
+          If Len(lcRefPapel) = 11 And Inlist(Left(lcRefPapel, 3), "B01", "B02", "B14", "B15")
+            lcRefEncf = lcRefPapel
+          Endif
+        Endif
         ldRefFec = fecha
         * Tipo 31: InformacionReferencia solo es valida en dos casos:
         *   - NCF referenciado NO empieza con E (papel/contingencia) → codigo 4.
@@ -2648,6 +2656,7 @@ Define Class ChalonaEcf As Custom
     ChalonaEcfUseInIfUsed("curChalRef")
     Create Cursor curChalRef ;
       (encf  C(20), ;
+       ncf    C(20), ;
        fecha D)
 
     ChalonaEcfUseInIfUsed("curChalFis")
@@ -3401,7 +3410,7 @@ Define Class ChalonaEcf As Custom
 
   Function _CargarReferenciaImtr
     Lparameters tcOcontrol
-    Local lcSql, lcRaw, lcQ, lcRefEncf, ldRefFecha, llFound
+    Local lcSql, lcRaw, lcQ, lcRefEncf, lcRefNcf, ldRefFecha, llFound
     If Vartype(tcOcontrol) # "C"
       tcOcontrol = ""
     Endif
@@ -3411,10 +3420,14 @@ Define Class ChalonaEcf As Custom
 
     * 1) Intento en dbo.imtr (ventas / facturas).
     ChalonaEcfUseInIfUsed(lcRaw)
-    lcSql = "SELECT TOP 1 encf, fecha FROM dbo.imtr WHERE control = " + lcQ
+    lcSql = "SELECT TOP 1 encf, ncf, fecha FROM dbo.imtr WHERE control = " + lcQ
     If !Request(lcSql, lcRaw)
-      ChalonaEcfLogError("SQL: imtr (referencia)", tcOcontrol, lcSql)
-      Return ""
+      * Un ERP sin la columna ncf en imtr: se lee como antes, sin el número de papel.
+      lcSql = "SELECT TOP 1 encf, fecha FROM dbo.imtr WHERE control = " + lcQ
+      If !Request(lcSql, lcRaw)
+        ChalonaEcfLogError("SQL: imtr (referencia)", tcOcontrol, lcSql)
+        Return ""
+      Endif
     Endif
     If Used(lcRaw) And Reccount(lcRaw) > 0
       llFound = .T.
@@ -3442,7 +3455,9 @@ Define Class ChalonaEcf As Custom
       Go Top
       lcRefEncf  = Iif(Type("encf") # "U", Alltrim(Transform(Nvl(encf, ""))), "")
       ldRefFecha = Iif(Inlist(Type("fecha"), "D", "T"), Iif(Type("fecha")="T", Ttod(fecha), fecha), {/})
-      Insert Into curChalRef (encf, fecha) Values (Left(lcRefEncf, 20), ldRefFecha)
+      * ncf: número de papel de una factura sin e-NCF; el cursor del gasto no lo trae.
+      lcRefNcf = Iif(Type("ncf") # "U", Alltrim(Transform(Nvl(ncf, ""))), "")
+      Insert Into curChalRef (encf, ncf, fecha) Values (Left(lcRefEncf, 20), Left(lcRefNcf, 20), ldRefFecha)
     Endif
     ChalonaEcfUseInIfUsed(lcRaw)
     Select curChalRef
