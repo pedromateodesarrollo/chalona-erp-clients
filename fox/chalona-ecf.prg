@@ -1120,11 +1120,12 @@ Function ChalonaEcfBuildDocJsonFox
     Endif
   Endif
 
-  * Nota 33/34 que modifica una Compras (E41): omitir TipoIngresos. No aplica a
-  * compras (obligatoriedad DGII 41=0); enviarlo genera observacion condicional
-  * "El campo TipoIngresos ... no es valido". lcRefEncf = NCF referenciado.
+  * Nota 33/34 que modifica una Compras (E41), un Gasto Menor (E43) o un Pago al
+  * Exterior (E47): omitir TipoIngresos. No aplica en esos tipos; enviarlo genera
+  * observacion condicional "El campo TipoIngresos ... no es valido" (E43: oct-2026).
+  * lcRefEncf = NCF referenciado.
   lcTipoIngFrag = '"TipoIngresos":"' + lcTipoIngresos + '",'
-  If (lcTipoeCF == "33" Or lcTipoeCF == "34") And Left(Alltrim(lcRefEncf), 3) == "E41"
+  If (lcTipoeCF == "33" Or lcTipoeCF == "34") And Inlist(Left(Alltrim(lcRefEncf), 3), "E41", "E43", "E47")
     lcTipoIngFrag = ""
   Endif
 
