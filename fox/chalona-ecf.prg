@@ -1601,6 +1601,9 @@ Define Class ChalonaEcf As Custom
   CfgEsExterna = .F.
   * Si .F., Enviar no abre el formulario largo; igual se muestra MESSAGEBOX breve si hay error.
   MostrarFormularioError = .T.
+  * .T. mientras corre la sincronizacion automatica tras enviar: solo "Pendiente DGII" (sql/1633),
+  * no los "En Proceso" viejos que el ERP pueda arrastrar (esos, con chalonaSincronizaEstados).
+  SyncSoloPendienteDgii = .F.
 
   * Constructor: credenciales y URL desde This.Cfg.
   * Si nadie inyectó vía SetConfig() antes de Init, se arma desde Public osis.
@@ -1911,7 +1914,37 @@ Define Class ChalonaEcf As Custom
     If llVersionDesact
       Return loResp
     Endif
-    Return This._EnviarFin(loResp, tcControl, tlSinMensajes)
+    loResp = This._EnviarFin(loResp, tcControl, tlSinMensajes)
+    This._SyncPendientesTrasEnviar()
+    Return loResp
+  Endproc
+
+  * Cola de reenvio a la DGII (sql/1633): si la DGII no contesta, el servidor deja el comprobante
+  * firmado en "Pendiente DGII" (ok, con su codigo de seguridad y timbre) y lo reenvia solo.
+  * Al enviar -como mucho cada 5 minutos- se recogen los "Pendiente DGII" / "En Proceso" del ERP
+  * (SincronizarEstadosEnProceso -> consulta_estado) y se escribe su estado final. Nunca hace
+  * fallar el envio: un error queda en el log y se sigue.
+  Procedure _SyncPendientesTrasEnviar
+    Local lnAhora, lnSel, loEx
+    Public gnChalonaEcfSyncPendSeg
+    If Type("gnChalonaEcfSyncPendSeg") # "N"
+      gnChalonaEcfSyncPendSeg = -9999
+    Endif
+    lnAhora = Seconds()
+    * Seconds() vuelve a 0 a medianoche: si el reloj quedo atras, toca de una vez.
+    If lnAhora >= gnChalonaEcfSyncPendSeg And lnAhora - gnChalonaEcfSyncPendSeg < 300
+      Return
+    Endif
+    gnChalonaEcfSyncPendSeg = lnAhora
+    lnSel = Select()
+    This.SyncSoloPendienteDgii = .T.
+    Try
+      This.SincronizarEstadosEnProceso()
+    Catch To loEx
+      ChalonaEcfLogException("SYNC: pendientes tras enviar", "", loEx, "")
+    Endtry
+    This.SyncSoloPendienteDgii = .F.
+    Select (lnSel)
   Endproc
 
   * Determinar origen del control: imtr / gastos / ambiguous / "".
@@ -3671,6 +3704,11 @@ Define Class ChalonaEcf As Custom
         "  @LockOwner = N'Session';")
   Endproc
 
+  * Los estados (en minusculas) que recoge la sincronizacion.
+  Function _SyncEstados
+    Return Iif(This.SyncSoloPendienteDgii, "N'pendiente dgii'", "N'en proceso', N'pendiente dgii'")
+  Endfunc
+
   Function _SyncListarPendientes
     Local lcCur, lcRaw
     lcCur = "curChalonaEncfEnProceso"
@@ -3683,13 +3721,13 @@ Define Class ChalonaEcf As Custom
         "  LTRIM(RTRIM(i.encf)) AS encf, " + ;
         "  CAST(0 AS bit) AS es_gastos " + ;
         "FROM dbo.imtr AS i " + ;
-        "WHERE LOWER(LTRIM(RTRIM(ISNULL(i.respuesta_estado, N'')))) = N'en proceso' " + ;
+        "WHERE LOWER(LTRIM(RTRIM(ISNULL(i.respuesta_estado, N'')))) IN (" + This._SyncEstados() + ") " + ;
         "  AND NULLIF(LTRIM(RTRIM(i.encf)), N'') IS NOT NULL " + ;
         "UNION ALL " + ;
         "SELECT " + ;
         "  LTRIM(RTRIM(g.control)), LTRIM(RTRIM(g.ncf)), CAST(1 AS bit) " + ;
         "FROM dbo.gastos AS g " + ;
-        "WHERE LOWER(LTRIM(RTRIM(ISNULL(g.respuesta_estado, N'')))) = N'en proceso' " + ;
+        "WHERE LOWER(LTRIM(RTRIM(ISNULL(g.respuesta_estado, N'')))) IN (" + This._SyncEstados() + ") " + ;
         "  AND NULLIF(LTRIM(RTRIM(g.ncf)), N'') IS NOT NULL;", ;
         lcRaw)
       Return ""
@@ -3742,11 +3780,11 @@ Define Class ChalonaEcf As Custom
         "SELECT t.control " + ;
         "FROM (" + ;
         "  SELECT LTRIM(RTRIM(i.control)) AS control FROM dbo.imtr AS i " + ;
-        "  WHERE LOWER(LTRIM(RTRIM(ISNULL(i.respuesta_estado, N'')))) = N'en proceso' " + ;
+        "  WHERE LOWER(LTRIM(RTRIM(ISNULL(i.respuesta_estado, N'')))) IN (" + This._SyncEstados() + ") " + ;
         "    AND NULLIF(LTRIM(RTRIM(i.encf)), N'') IS NOT NULL " + ;
         "  UNION ALL " + ;
         "  SELECT LTRIM(RTRIM(g.control)) AS control FROM dbo.gastos AS g " + ;
-        "  WHERE LOWER(LTRIM(RTRIM(ISNULL(g.respuesta_estado, N'')))) = N'en proceso' " + ;
+        "  WHERE LOWER(LTRIM(RTRIM(ISNULL(g.respuesta_estado, N'')))) IN (" + This._SyncEstados() + ") " + ;
         "    AND NULLIF(LTRIM(RTRIM(g.ncf)), N'') IS NOT NULL " + ;
         ") AS t " + ;
         "GROUP BY t.control " + ;
