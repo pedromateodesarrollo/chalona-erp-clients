@@ -206,6 +206,27 @@ Function chalonaRecibidoXml
   Return loResp
 Endfunc
 
+* chalonaRecibidoConsulta(tcNcf, tcRncEmisor [, tcCodigoSeguridad]) -> ChalonaResponse
+*   La factura que un suplidor le emitio a la empresa (ventana de GASTOS).
+*   Busca en lo recibido en Chalona y, si no esta, valida en la DGII. data.origen
+*   dice de donde salio: "chalona_recibidos" (detalle completo con renglones),
+*   "dgii" (SIN DETALLE: solo estado/monto/ITBIS/fechas; exige tcCodigoSeguridad)
+*   o "ninguno". Ver RECIBIDO-CONSULTA.md. Para cursores: goChalonaEcf.RecibidoConsultaACursores(loResp).
+Function chalonaRecibidoConsulta
+  Lparameters tcNcf, tcRncEmisor, tcCodigoSeguridad
+  If !_ChalonaLoaderInit()
+    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+  Endif
+  Local loResp
+  loResp = goChalonaEcf.RecibidoConsulta(tcNcf, tcRncEmisor, tcCodigoSeguridad)
+  If _ChalonaLoaderEsVersionDesact(loResp)
+    If _ChalonaLoaderDescargar()
+      loResp = goChalonaEcf.RecibidoConsulta(tcNcf, tcRncEmisor, tcCodigoSeguridad)
+    Endif
+  Endif
+  Return loResp
+Endfunc
+
 * chalonaRecibidoAprobar(tnId) -> ChalonaResponse
 *   Emite el ACECF firmado hacia DGII y hacia el suplidor.
 *   data.enviada_a_dgii = .F. NO es un fallo: la decision quedo guardada y el
