@@ -1,12 +1,74 @@
 # Consultar la factura que un suplidor le emitió a la empresa (ventana de gastos)
 
-`chalonaRecibidoConsulta(tcNcf, tcRncEmisor [, tcCodigoSeguridad])` → `ChalonaResponse`
-(método `goChalonaEcf.RecibidoConsulta`, en el script publicado: llega sin tocar el ERP; el
-envoltorio `chalonaRecibidoConsulta` está en `chalona-ecf-loader.prg`, el que ya instala el cliente).
-Sin el envoltorio también sirve: `chalonaConsultaApi("ecf_recibido_consulta", '{"numero":"E31…","emisor":"101…"}')`.
+```foxpro
+llOk = goChalonaEcf.RecibidoConsulta(tcNcf, tcRncEmisor [, tcCodigoSeguridad] [, tcCurCab] [, tcCurDet])
+```
 
-Los dos primeros son obligatorios: **e-NCF** de la factura del suplidor y **RNC del suplidor** (emisor).
-La empresa compradora es la de la sesión.
+**Sin JSON**: deja dos cursores VFP listos y devuelve `.T.` si encontró la factura, `.F.` si no
+(el porqué en `goChalonaEcf.RecibidoMensaje`, que es lo mismo que `curRecibidoCab.motivo`).
+Los cursores se crean siempre, aunque dé `.F.`.
+
+- `tcNcf` / `tcRncEmisor` (obligatorios): **e-NCF** de la factura del suplidor y **RNC del suplidor** (emisor).
+  La empresa compradora es la de la sesión.
+- `tcCodigoSeguridad` (opcional): los 6 caracteres que el suplidor imprime junto al QR. Solo hace falta
+  si la factura no está en Chalona y hay que validarla en la DGII.
+- `tcCurCab` / `tcCurDet` (opcionales): nombres de los cursores. Por omisión `curRecibidoCab` y `curRecibidoDet`.
+
+El método vive en el script publicado (`chalona-ecf.prg`, llega solo al ERP). El loader trae además el
+envoltorio `chalonaRecibidoConsulta(...)` con los mismos parámetros y el mismo retorno, que recarga el script
+si el servidor lo da por desactualizado. Quien prefiera el JSON: `goChalonaEcf.RecibidoConsultaResp(tcNcf, tcRnc [, tcCod])`
+→ `ChalonaResponse`, y `goChalonaEcf.RecibidoConsultaACursores(loResp [, tcCurCab] [, tcCurDet])` lo pasa a cursores.
+
+## Ejemplo desde la ventana de GASTOS
+
+```foxpro
+* txtNcf / txtRncSuplidor: lo que digitó el usuario; txtCodSeg: código de seguridad del QR (opcional)
+If goChalonaEcf.RecibidoConsulta(thisform.txtNcf.Value, thisform.txtRncSuplidor.Value, thisform.txtCodSeg.Value)
+  Select curRecibidoCab
+  thisform.txtFecha.Value  = curRecibidoCab.fecha               && tipo D
+  thisform.txtTotal.Value  = curRecibidoCab.MontoTotal
+  thisform.txtItbis.Value  = curRecibidoCab.TotalITBIS
+  If curRecibidoCab.origen == "chalona_recibidos"
+    thisform.txtSuplidor.Value = curRecibidoCab.emisor_nom
+    thisform.txtGravado.Value  = curRecibidoCab.MontoGravadoTotal
+    thisform.txtExento.Value   = curRecibidoCab.MontoExento
+    thisform.txtItbisRet.Value = curRecibidoCab.TotalITBISRetenido
+    thisform.txtIsrRet.Value   = curRecibidoCab.TotalISRRetencion
+    Select curRecibidoDet                                       && un registro por renglón
+    Scan
+      * Insert Into mis_gastos_det (descripcion, cantidad, precio, monto) ;
+      *   Values (curRecibidoDet.nombre, curRecibidoDet.cantidad, curRecibidoDet.precio, curRecibidoDet.monto)
+    Endscan
+  Else
+    * origen = "dgii": SIN DETALLE (curRecibidoDet vacío), solo estado, MontoTotal, TotalITBIS y fechas
+    MESSAGEBOX("Validada en la DGII (" + Alltrim(curRecibidoCab.dgii_estado) + "). " + curRecibidoCab.aviso)
+  Endif
+Else
+  MESSAGEBOX(goChalonaEcf.RecibidoMensaje)   && p. ej. «…pida el código de seguridad al suplidor»
+  If curRecibidoCab.requiere == "codigo_seguridad"
+    thisform.txtCodSeg.SetFocus()
+  Endif
+Endif
+```
+
+Con otros nombres de cursor: `goChalonaEcf.RecibidoConsulta(lcNcf, lcRnc, "", "c_gcab", "c_gdet")`.
+
+## Los cursores
+
+**`curRecibidoCab`** (un registro):
+
+| Grupo | Campos |
+|---|---|
+| Resultado | `encontrado` L, `origen` C(20) (`chalona_recibidos` · `dgii` · `ninguno`), `motivo` C(254), `sin_detalle` L, `aviso` C(120), `requiere` C(30) (`codigo_seguridad` si solo faltó el código) |
+| Cabecera | `id` N, `numero` C(13), `tipo` C(2), `emisor` C(11), `emisor_nom` C(150), `comprador` C(11), `comprador_nom` C(150), `fecha` D, `fecha_firma` C(19), `tipo_pago` C(1), `fecha_venc_pago` D, `fecha_venc_sec` D, `moneda` C(3), `ncf_modificado` C(19), `estado` C(30) (estado en Chalona; si origen=dgii, el de la DGII), `aprobacion` N(1) (0 por decidir, 1 aprobado, 2 rechazado), `dgii_estado` C(30), `codigo_seguridad` C(6) |
+| Totales (nombre DGII, N(16,2); `ITBIS1..3` son las tasas, N(5,2)) | `MontoGravadoTotal`, `MontoGravadoI1`, `MontoGravadoI2`, `MontoGravadoI3`, `MontoExento`, `ITBIS1`, `ITBIS2`, `ITBIS3`, `TotalITBIS`, `TotalITBIS1`, `TotalITBIS2`, `TotalITBIS3`, `MontoImpuestoAdicional`, `TotalITBISRetenido`, `TotalISRRetencion`, `TotalITBISPercepcion`, `TotalISRPercepcion`, `MontoNoFacturable`, `MontoPeriodo`, `SaldoAnterior`, `MontoAvancePago`, `ValorPagar`, `MontoTotal` |
+
+Un total que el e-CF no trae queda en 0. Con `origen = "dgii"` solo se llenan `numero`, `tipo`, `emisor`, `comprador`,
+`fecha`, `fecha_firma`, `estado`/`dgii_estado`, `codigo_seguridad`, `MontoTotal` y `TotalITBIS`.
+
+**`curRecibidoDet`** (un registro por renglón; vacío si `origen <> "chalona_recibidos"`): `linea` N(5), `nombre` C(120),
+`descrip` M, `bien_serv` N(1) (1 bien, 2 servicio), `ind_itbis` N(2) (indicador de facturación), `cantidad` N(16,4),
+`unidad` C(10), `precio` N(18,6), `descuento` N(16,2), `recargo` N(16,2), `monto` N(16,2), `itbis_ret` N(16,2), `isr_ret` N(16,2).
 
 ## De dónde sale el dato (`data.origen`, siempre viene)
 
@@ -26,32 +88,5 @@ La empresa compradora es la de la sesión.
 - **ConsultaTimbre** (página pública, sin token): mismos datos que el QR (necesita fecha de emisión, monto y firma además del código); HTML con el estado.
 - Ninguno da renglones, descripciones, retenciones ni datos del suplidor más allá del RNC. **El detalle de una factura ajena solo existe si el suplidor la envía a Chalona.**
 
-## Ejemplo desde la ventana de GASTOS
 
-```foxpro
-* tcNcf / tcRnc: lo que el usuario digitó; tcCod: código de seguridad del QR (opcional)
-loResp = chalonaRecibidoConsulta(thisform.txtNcf.Value, thisform.txtRncSuplidor.Value, thisform.txtCodSeg.Value)
-If goChalonaEcf.RecibidoConsultaACursores(loResp)       && crea curRecibidoCab y curRecibidoRen
-  Select curRecibidoCab
-  Do Case
-    Case curRecibidoCab.origen == "chalona_recibidos"
-      thisform.txtSuplidor.Value = curRecibidoCab.emisor_nom
-      thisform.txtFecha.Value    = Date(Val(Left(curRecibidoCab.fecha,4)), Val(Substr(curRecibidoCab.fecha,6,2)), Val(Right(curRecibidoCab.fecha,2)))
-      thisform.txtTotal.Value    = curRecibidoCab.total
-      thisform.txtItbis.Value    = curRecibidoCab.itbis
-      Select curRecibidoRen                              && renglones para el detalle del gasto
-    Case curRecibidoCab.origen == "dgii"
-      * SIN DETALLE: solo se puede validar monto / ITBIS / estado
-      MESSAGEBOX("Validada en la DGII (" + curRecibidoCab.dgii_est + "), total " + ;
-        TRANSFORM(curRecibidoCab.total) + ". " + curRecibidoCab.aviso)
-  Endcase
-Else
-  MESSAGEBOX(curRecibidoCab.mensaje)   && p. ej. «…pida el código de seguridad al suplidor»
-Endif
-```
-
-`curRecibidoCab` (un registro): origen, sin_detalle, aviso, encontrado, numero, emisor, emisor_nom, tipo, fecha, total, gravado,
-exento, itbis, itbis_ret, isr_ret, estado, dgii_est, mensaje. `curRecibidoRen`: linea, nombre, descrip, cantidad, unidad, precio,
-descuento, monto, ind_itbis, itbis_ret, isr_ret.
-
-Endpoint (Postgres `fn.ecf_recibido_consulta`, sql/1856; la caída a la DGII la hace el middleware `EcfRecibidoConsulta` de sf).
+Endpoint: Postgres `fn.ecf_recibido_consulta` (sql/1856); la caída a la DGII la hace el middleware `EcfRecibidoConsulta` de sf.

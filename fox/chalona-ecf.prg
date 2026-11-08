@@ -1604,6 +1604,9 @@ Define Class ChalonaEcf As Custom
   * .T. mientras corre la sincronizacion automatica tras enviar: solo "Pendiente DGII" (sql/1633),
   * no los "En Proceso" viejos que el ERP pueda arrastrar (esos, con chalonaSincronizaEstados).
   SyncSoloPendienteDgii = .F.
+  * RecibidoConsulta: por que dio .F. (igual a curRecibidoCab.motivo) y la respuesta cruda del API.
+  RecibidoMensaje = ""
+  RecibidoRespuesta = .Null.
 
   * Constructor: credenciales y URL desde This.Cfg.
   * Si nadie inyectó vía SetConfig() antes de Init, se arma desde Public osis.
@@ -2156,35 +2159,53 @@ Define Class ChalonaEcf As Custom
     Return This.ConsultaApi("ecf_recibido_xml", '{"id":' + Transform(Int(tnId)) + '}')
   Endproc
 
-  * RecibidoConsulta(tcNcf, tcRncEmisor [, tcCodigoSeguridad]) -> ChalonaResponse
+  * RecibidoConsulta(tcNcf, tcRncEmisor [, tcCodigoSeguridad] [, tcCurCab] [, tcCurDet]) -> .T./.F.
   *
   * La factura que un SUPLIDOR le emitio a la empresa (comprobante recibido), por su
-  * e-NCF y el RNC del suplidor (emisor). Pensada para la ventana de GASTOS del ERP.
+  * e-NCF y el RNC del suplidor (emisor). Pensada para la ventana de GASTOS del ERP:
+  * NO hay que manejar JSON, deja dos cursores listos:
+  *
+  *   tcCurCab (def. curRecibidoCab): UN registro con encontrado, origen, motivo,
+  *     la cabecera (numero, tipo, emisor, emisor_nom, comprador, fecha D, tipo_pago,
+  *     moneda, ncf_modificado, estado...) y los TOTALES aplanados con su nombre DGII
+  *     (MontoGravadoTotal, MontoGravadoI1..I3, MontoExento, TotalITBIS, TotalITBIS1..3,
+  *     TotalITBISRetenido, TotalISRRetencion, MontoImpuestoAdicional, MontoTotal...).
+  *   tcCurDet (def. curRecibidoDet): un registro por renglon (linea, nombre, descrip,
+  *     cantidad, unidad, precio, descuento, recargo, monto, ind_itbis, itbis_ret, isr_ret).
+  *
   * El servidor busca primero lo que Chalona recibio del suplidor y, si no esta, valida
-  * en la DGII. SIEMPRE dice de donde salio el dato (data.origen):
+  * en la DGII. El campo origen dice de donde salio el dato:
+  *   "chalona_recibidos" : el suplidor deposito el XML en Chalona. TODO el detalle.
+  *   "dgii"              : no esta en Chalona. SIN DETALLE (sin_detalle = .T., cursor de
+  *                         renglones vacio): estado, MontoTotal, TotalITBIS y fechas.
+  *                         Exige tcCodigoSeguridad (6 caracteres junto al QR del suplidor).
+  *   "ninguno"           : no se pudo; motivo dice por que (requiere = "codigo_seguridad"
+  *                         si solo falto el codigo).
   *
-  *   "chalona_recibidos" : el suplidor deposito el XML en Chalona. Trae TODO el
-  *                         detalle: cabecera, totales, ITBIS, retenciones y renglones.
-  *   "dgii"              : no esta en Chalona. SIN DETALLE, solo validacion DGII
-  *                         (data.sin_detalle = .T.): estado, monto total, ITBIS, fecha
-  *                         de emision y de firma. Exige tcCodigoSeguridad (los 6
-  *                         caracteres que el suplidor imprime con el QR); la DGII no
-  *                         da trackId ni renglones a quien es comprador.
-  *   "ninguno"           : no se pudo. data.dgii_error dice por que; data.requiere =
-  *                         "codigo_seguridad" si falto el codigo.
-  *
-  * Para usarlo desde un formulario: RecibidoConsultaACursores(loResp) arma los cursores.
+  * Devuelve .T. si encontro la factura. .F. => This.RecibidoMensaje (igual a
+  * curRecibidoCab.motivo) dice por que; los dos cursores quedan creados igual.
+  * La respuesta cruda queda en This.RecibidoRespuesta (ChalonaResponse).
   Procedure RecibidoConsulta
+    Lparameters tcNcf, tcRncEmisor, tcCodigoSeguridad, tcCurCab, tcCurDet
+    Local loResp
+    loResp = This.RecibidoConsultaResp(tcNcf, tcRncEmisor, tcCodigoSeguridad)
+    Return This.RecibidoConsultaACursores(loResp, tcCurCab, tcCurDet)
+  Endproc
+
+  * RecibidoConsultaResp(tcNcf, tcRncEmisor [, tcCodigoSeguridad]) -> ChalonaResponse
+  * Lo mismo que RecibidoConsulta pero devuelve la respuesta del API sin cursores
+  * (data.origen, data.cabecera, data.totales, data.renglones, data.dgii).
+  Procedure RecibidoConsultaResp
     Lparameters tcNcf, tcRncEmisor, tcCodigoSeguridad
     Local lcNcf, lcRnc, lcCod, lcData
     lcNcf = Iif(Vartype(tcNcf) = "C", Upper(Strtran(Alltrim(tcNcf), " ", "")), "")
-    lcRnc = Iif(Vartype(tcRncEmisor) = "C", Alltrim(tcRncEmisor), "")
+    lcRnc = Iif(Vartype(tcRncEmisor) = "C", Chrtran(Alltrim(tcRncEmisor), "- ", ""), "")
     lcCod = Iif(Vartype(tcCodigoSeguridad) = "C", Alltrim(tcCodigoSeguridad), "")
     If Empty(lcNcf)
-      Return ChalonaResponseNew(.F., "err.ecf_recibido.numero_requerido", "", "")
+      Return ChalonaResponseNew(.F., "Falta el e-NCF del comprobante.", "", "")
     Endif
     If Empty(lcRnc)
-      Return ChalonaResponseNew(.F., "err.ecf_recibido.emisor_requerido", "", "")
+      Return ChalonaResponseNew(.F., "Falta el RNC del suplidor (emisor).", "", "")
     Endif
     lcData = '{"numero":"' + _JsonEscape(lcNcf) + '","emisor":"' + _JsonEscape(lcRnc) + '"'
     If Not Empty(lcCod)
@@ -2193,108 +2214,139 @@ Define Class ChalonaEcf As Custom
     Return This.ConsultaApi("ecf_recibido_consulta", lcData + "}")
   Endproc
 
-  * RecibidoConsultaACursores(toResp [, tcCurCab] [, tcCurRen]) -> .T. si hay datos
-  *
-  * Vuelca la respuesta de RecibidoConsulta a dos cursores:
-  *   curRecibidoCab (por omision): UN registro: origen, sin_detalle, aviso, encontrado,
-  *     numero, emisor, emisor_nom, tipo, fecha, total, gravado, exento, itbis,
-  *     itbis_ret, isr_ret, estado, dgii_est, mensaje.
-  *   curRecibidoRen (por omision): un registro por renglon (solo origen = chalona_recibidos).
+  * RecibidoConsultaACursores(toResp [, tcCurCab] [, tcCurDet]) -> .T./.F.
+  * Vuelca una respuesta de RecibidoConsultaResp a los cursores de RecibidoConsulta.
   Procedure RecibidoConsultaACursores
-    Lparameters toResp, tcCurCab, tcCurRen
-    Local lcCab, lcRen, loD, loC, loT, loR, loE, i, llOk
-    Local lcOrigen, loEx
+    Lparameters toResp, tcCurCab, tcCurDet
+    Local lcCab, lcDet, loD, loC, loT, loR, loE, loG, i, llOk, lcOrigen, lcMsg, loEx
+    Local lcTotales, lcCampo
     lcCab = Iif(Vartype(tcCurCab) = "C" And Not Empty(tcCurCab), Alltrim(tcCurCab), "curRecibidoCab")
-    lcRen = Iif(Vartype(tcCurRen) = "C" And Not Empty(tcCurRen), Alltrim(tcCurRen), "curRecibidoRen")
+    lcDet = Iif(Vartype(tcCurDet) = "C" And Not Empty(tcCurDet), Alltrim(tcCurDet), "curRecibidoDet")
+    This.RecibidoRespuesta = toResp
+    This.RecibidoMensaje = ""
     If Used(lcCab)
       Use In (lcCab)
     Endif
-    If Used(lcRen)
-      Use In (lcRen)
+    If Used(lcDet)
+      Use In (lcDet)
     Endif
-    Create Cursor (lcRen) (linea N(5), nombre C(120), descrip C(120), cantidad N(14,4), unidad C(10), ;
-      precio N(16,4), descuento N(14,2), monto N(14,2), ind_itbis N(2), itbis_ret N(14,2), isr_ret N(14,2))
-    Create Cursor (lcCab) (origen C(20), sin_detalle L, aviso C(120), encontrado L, numero C(13), emisor C(11), ;
-      emisor_nom C(150), tipo C(2), fecha C(10), total N(16,2), gravado N(16,2), exento N(16,2), itbis N(16,2), ;
-      itbis_ret N(16,2), isr_ret N(16,2), estado C(30), dgii_est C(30), mensaje C(254))
+    Create Cursor (lcDet) (linea N(5), nombre C(120), descrip M, bien_serv N(1), ind_itbis N(2), ;
+      cantidad N(16,4), unidad C(10), precio N(18,6), descuento N(16,2), recargo N(16,2), monto N(16,2), ;
+      itbis_ret N(16,2), isr_ret N(16,2))
+    * Totales: mismo nombre que el nodo <Totales> del e-CF.
+    lcTotales = "MontoGravadoTotal MontoGravadoI1 MontoGravadoI2 MontoGravadoI3 MontoExento " + ;
+      "ITBIS1 ITBIS2 ITBIS3 TotalITBIS TotalITBIS1 TotalITBIS2 TotalITBIS3 MontoImpuestoAdicional " + ;
+      "TotalITBISRetenido TotalISRRetencion TotalITBISPercepcion TotalISRPercepcion MontoNoFacturable " + ;
+      "MontoPeriodo SaldoAnterior MontoAvancePago ValorPagar MontoTotal"
+    Create Cursor (lcCab) (encontrado L, origen C(20), motivo C(254), sin_detalle L, aviso C(120), requiere C(30), ;
+      id N(10), numero C(13), tipo C(2), emisor C(11), emisor_nom C(150), comprador C(11), comprador_nom C(150), ;
+      fecha D, fecha_firma C(19), tipo_pago C(1), fecha_venc_pago D, fecha_venc_sec D, moneda C(3), ;
+      ncf_modificado C(19), estado C(30), aprobacion N(1), dgii_estado C(30), codigo_seguridad C(6), ;
+      MontoGravadoTotal N(16,2), MontoGravadoI1 N(16,2), MontoGravadoI2 N(16,2), MontoGravadoI3 N(16,2), ;
+      MontoExento N(16,2), ITBIS1 N(5,2), ITBIS2 N(5,2), ITBIS3 N(5,2), TotalITBIS N(16,2), ;
+      TotalITBIS1 N(16,2), TotalITBIS2 N(16,2), TotalITBIS3 N(16,2), MontoImpuestoAdicional N(16,2), ;
+      TotalITBISRetenido N(16,2), TotalISRRetencion N(16,2), TotalITBISPercepcion N(16,2), ;
+      TotalISRPercepcion N(16,2), MontoNoFacturable N(16,2), MontoPeriodo N(16,2), SaldoAnterior N(16,2), ;
+      MontoAvancePago N(16,2), ValorPagar N(16,2), MontoTotal N(16,2))
     Append Blank
 
     llOk = .F.
-    loD = Iif(Vartype(toResp) = "O", toResp.data, .Null.)
-    If Vartype(loD) # "O"
-      Replace mensaje With Iif(Vartype(toResp) = "O", Left(Transform(toResp.message), 254), "sin respuesta") In (lcCab)
-      Return .F.
+    lcMsg = ""
+    loD = .Null.
+    If Vartype(toResp) = "O"
+      If toResp.ok And PemStatus(toResp, "data", 5)
+        loD = toResp.data
+      Endif
+      If !toResp.ok
+        lcMsg = _ChalonaRecC(toResp, "message")
+      Endif
+    Else
+      lcMsg = "Sin respuesta del servidor."
     Endif
 
-    lcOrigen = Iif(PemStatus(loD, "origen", 5), Transform(loD.origen), "ninguno")
-    Replace origen With lcOrigen, encontrado With (PemStatus(loD, "encontrado", 5) And loD.encontrado = .T.), ;
-      sin_detalle With (PemStatus(loD, "sin_detalle", 5) And loD.sin_detalle = .T.) In (lcCab)
-    If PemStatus(loD, "aviso", 5)
-      Replace aviso With Left(Transform(loD.aviso), 120) In (lcCab)
-    Endif
-    If PemStatus(loD, "dgii_error", 5)
-      Replace mensaje With Left(Transform(loD.dgii_error), 254) In (lcCab)
-    Else
-      If PemStatus(loD, "motivo", 5)
-        Replace mensaje With Left(Transform(loD.motivo), 254) In (lcCab)
-      Endif
-    Endif
+    If Vartype(loD) = "O"
+      Try
+        lcOrigen = _ChalonaRecC(loD, "origen")
+        lcOrigen = Iif(Empty(lcOrigen), "ninguno", lcOrigen)
+        Replace origen With lcOrigen, encontrado With _ChalonaRecL(loD, "encontrado"), ;
+          sin_detalle With _ChalonaRecL(loD, "sin_detalle"), ;
+          aviso With _ChalonaRecC(loD, "aviso"), requiere With _ChalonaRecC(loD, "requiere") In (lcCab)
+        lcMsg = _ChalonaRecC(loD, "dgii_error")
+        If Empty(lcMsg)
+          lcMsg = _ChalonaRecC(loD, "motivo")
+        Endif
 
-    Try
-    If lcOrigen == "chalona_recibidos"
-      loC = loD.cabecera
-      Replace numero With loC.numero, emisor With loC.emisor, emisor_nom With Left(Nvl(loC.emisor_nombre, ""), 150), ;
-        tipo With loC.tipo, fecha With Transform(loC.fecha), total With Nvl(loC.total, 0), estado With loC.estado In (lcCab)
-      loT = loD.totales
-      If Vartype(loT) = "O"
-        If PemStatus(loT, "MontoGravadoTotal", 5)
-          Replace gravado With loT.MontoGravadoTotal In (lcCab)
-        Endif
-        If PemStatus(loT, "MontoExento", 5)
-          Replace exento With loT.MontoExento In (lcCab)
-        Endif
-        If PemStatus(loT, "TotalITBIS", 5)
-          Replace itbis With loT.TotalITBIS In (lcCab)
-        Endif
-        If PemStatus(loT, "TotalITBISRetenido", 5)
-          Replace itbis_ret With loT.TotalITBISRetenido In (lcCab)
-        Endif
-        If PemStatus(loT, "TotalISRRetencion", 5)
-          Replace isr_ret With loT.TotalISRRetencion In (lcCab)
-        Endif
-      Endif
-      loR = loD.renglones
-      If Vartype(loR) = "O"
-        For i = 1 To loR.Count
-          loE = loR.Item(i)
-          Insert Into (lcRen) (linea, nombre, descrip, cantidad, unidad, precio, descuento, monto, ind_itbis, itbis_ret, isr_ret) ;
-            Values (Nvl(loE.linea, 0), Left(Nvl(loE.nombre, ""), 120), Left(Nvl(loE.descripcion, ""), 120), Nvl(loE.cantidad, 0), ;
-            Left(Nvl(loE.unidad_medida, ""), 10), Nvl(loE.precio_unitario, 0), Nvl(loE.descuento, 0), Nvl(loE.monto, 0), ;
-            Nvl(loE.indicador_itbis, 0), Nvl(loE.itbis_retenido, 0), Nvl(loE.isr_retenido, 0))
-        Endfor
-      Endif
-      llOk = .T.
-    Else
-      If lcOrigen == "dgii"
-        If PemStatus(loD, "dgii", 5)
-          If Vartype(loD.dgii) = "O"
-            If PemStatus(loD.dgii, "estado_por_codigo", 5)
-              If Vartype(loD.dgii.estado_por_codigo) = "O"
-                loE = loD.dgii.estado_por_codigo
-                Replace numero With Transform(loE.ncfElectronico), emisor With Transform(loE.rncEmisor), ;
-                  fecha With Transform(loE.fechaEmision), total With Nvl(loE.montoTotal, 0), itbis With Nvl(loE.totalITBIS, 0), ;
-                  dgii_est With Left(Transform(loE.estado), 30), estado With Left(Transform(loE.estado), 30) In (lcCab)
-                llOk = .T.
+        Do Case
+        Case lcOrigen == "chalona_recibidos"
+          loC = _ChalonaRecProp(loD, "cabecera")
+          If Vartype(loC) = "O"
+            Replace id With _ChalonaEcfNzNum(_ChalonaRecProp(loC, "id")), numero With _ChalonaRecC(loC, "numero"), ;
+              tipo With _ChalonaRecC(loC, "tipo"), emisor With _ChalonaRecC(loC, "emisor"), ;
+              emisor_nom With _ChalonaRecC(loC, "emisor_nombre"), comprador With _ChalonaRecC(loC, "comprador"), ;
+              comprador_nom With _ChalonaRecC(loC, "comprador_nombre"), fecha With _ChalonaRecFecha(_ChalonaRecC(loC, "fecha")), ;
+              fecha_firma With _ChalonaRecC(loC, "fecha_hora_firma"), tipo_pago With _ChalonaRecC(loC, "tipo_pago"), ;
+              fecha_venc_pago With _ChalonaRecFecha(_ChalonaRecC(loC, "fecha_vencimiento_pago")), ;
+              fecha_venc_sec With _ChalonaRecFecha(_ChalonaRecC(loC, "fecha_vencimiento_secuencia")), ;
+              moneda With _ChalonaRecC(loC, "moneda"), ncf_modificado With _ChalonaRecC(loC, "ncf_modificado"), ;
+              estado With _ChalonaRecC(loC, "estado"), aprobacion With _ChalonaEcfNzNum(_ChalonaRecProp(loC, "aprobacion_estado")), ;
+              MontoTotal With _ChalonaEcfNzNum(_ChalonaRecProp(loC, "total")) In (lcCab)
+          Endif
+          loT = _ChalonaRecProp(loD, "totales")
+          If Vartype(loT) = "O"
+            For i = 1 To Getwordcount(lcTotales)
+              lcCampo = Getwordnum(lcTotales, i)
+              If PemStatus(loT, lcCampo, 5)
+                Replace (lcCampo) With _ChalonaEcfNzNum(_ChalonaRecProp(loT, lcCampo)) In (lcCab)
               Endif
+            Endfor
+          Endif
+          loR = _ChalonaRecProp(loD, "renglones")
+          If Vartype(loR) = "O"
+            For i = 1 To loR.Count
+              loE = loR.Item(i)
+              Insert Into (lcDet) (linea, nombre, descrip, bien_serv, ind_itbis, cantidad, unidad, precio, ;
+                descuento, recargo, monto, itbis_ret, isr_ret) ;
+                Values (_ChalonaEcfNzNum(_ChalonaRecProp(loE, "linea")), _ChalonaRecC(loE, "nombre"), ;
+                _ChalonaRecC(loE, "descripcion"), _ChalonaEcfNzNum(_ChalonaRecProp(loE, "bien_o_servicio")), ;
+                _ChalonaEcfNzNum(_ChalonaRecProp(loE, "indicador_itbis")), _ChalonaEcfNzNum(_ChalonaRecProp(loE, "cantidad")), ;
+                _ChalonaRecC(loE, "unidad_medida"), _ChalonaEcfNzNum(_ChalonaRecProp(loE, "precio_unitario")), ;
+                _ChalonaEcfNzNum(_ChalonaRecProp(loE, "descuento")), _ChalonaEcfNzNum(_ChalonaRecProp(loE, "recargo")), ;
+                _ChalonaEcfNzNum(_ChalonaRecProp(loE, "monto")), _ChalonaEcfNzNum(_ChalonaRecProp(loE, "itbis_retenido")), ;
+                _ChalonaEcfNzNum(_ChalonaRecProp(loE, "isr_retenido")))
+            Endfor
+          Endif
+          llOk = .T.
+
+        Case lcOrigen == "dgii"
+          loG = _ChalonaRecProp(loD, "dgii")
+          If Vartype(loG) = "O"
+            loE = _ChalonaRecProp(loG, "estado_por_codigo")
+            If Vartype(loE) = "O"
+              Replace numero With _ChalonaRecC(loE, "ncfElectronico"), tipo With Substr(_ChalonaRecC(loE, "ncfElectronico"), 2, 2), ;
+                emisor With _ChalonaRecC(loE, "rncEmisor"), comprador With _ChalonaRecC(loE, "rncComprador"), ;
+                fecha With _ChalonaRecFecha(_ChalonaRecC(loE, "fechaEmision")), fecha_firma With _ChalonaRecC(loE, "fechaFirma"), ;
+                dgii_estado With _ChalonaRecC(loE, "estado"), estado With _ChalonaRecC(loE, "estado"), ;
+                codigo_seguridad With _ChalonaRecC(loE, "codigoSeguridad"), ;
+                MontoTotal With _ChalonaEcfNzNum(_ChalonaRecProp(loE, "montoTotal")), ;
+                TotalITBIS With _ChalonaEcfNzNum(_ChalonaRecProp(loE, "totalITBIS")) In (lcCab)
+              llOk = .T.
             Endif
           Endif
-        Endif
-      Endif
+          If !llOk And Empty(lcMsg)
+            lcMsg = "La DGII no devolvio el estado de la factura."
+          Endif
+        Endcase
+      Catch To loEx
+        lcMsg = "No se pudo leer la respuesta: " + loEx.Message
+        llOk = .F.
+      Endtry
     Endif
-    Catch To loEx
-      Replace mensaje With Left("No se pudo leer la respuesta: " + loEx.Message, 254) In (lcCab)
-      llOk = .F.
-    Endtry
+
+    If !llOk And Empty(lcMsg)
+      lcMsg = "No se encontro la factura del suplidor."
+    Endif
+    Replace motivo With Left(lcMsg, 254) In (lcCab)
+    This.RecibidoMensaje = lcMsg
     Select (lcCab)
     Go Top
     Return llOk
@@ -5042,6 +5094,64 @@ Function _ChalonaIsoParaSqlDatetime
     Return ""
   Endif
   Return lc
+Endfunc
+
+*------------------------------------------------------------
+* Lectura segura de la respuesta de ecf_recibido_consulta (RecibidoConsultaACursores).
+*------------------------------------------------------------
+Function _ChalonaRecProp
+  Lparameters toObj, tcProp
+  If Vartype(toObj) = "O"
+    If PemStatus(toObj, tcProp, 5)
+      Return GetPem(toObj, tcProp)
+    Endif
+  Endif
+  Return .Null.
+Endfunc
+
+Function _ChalonaRecC
+  Lparameters toObj, tcProp
+  Local lv
+  lv = _ChalonaRecProp(toObj, tcProp)
+  Do Case
+  Case Vartype(lv) = "C"
+    Return Alltrim(lv)
+  Case Vartype(lv) = "N"
+    Return Alltrim(Transform(lv))
+  Case Vartype(lv) = "L"
+    Return Iif(lv, "true", "false")
+  Otherwise
+    Return ""
+  Endcase
+Endfunc
+
+Function _ChalonaRecL
+  Lparameters toObj, tcProp
+  Local lv
+  lv = _ChalonaRecProp(toObj, tcProp)
+  Return Iif(Vartype(lv) = "L", lv, .F.)
+Endfunc
+
+* "AAAA-MM-DD..." o "DD-MM-AAAA..." -> fecha; otra cosa -> {}.
+Function _ChalonaRecFecha
+  Lparameters tcFecha
+  Local lc, lnA, lnM, lnD
+  lc = Alltrim(Nvl(tcFecha, ""))
+  lnA = 0
+  Do Case
+  Case Len(lc) >= 10 And Substr(lc, 5, 1) = "-"
+    lnA = Val(Left(lc, 4))
+    lnM = Val(Substr(lc, 6, 2))
+    lnD = Val(Substr(lc, 9, 2))
+  Case Len(lc) >= 10 And Substr(lc, 3, 1) = "-"
+    lnA = Val(Substr(lc, 7, 4))
+    lnM = Val(Substr(lc, 4, 2))
+    lnD = Val(Left(lc, 2))
+  Endcase
+  If lnA < 1900 Or lnM < 1 Or lnM > 12 Or lnD < 1 Or lnD > 31
+    Return {}
+  Endif
+  Return Date(lnA, lnM, lnD)
 Endfunc
 
 Function _JsonEscape

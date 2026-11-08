@@ -206,25 +206,31 @@ Function chalonaRecibidoXml
   Return loResp
 Endfunc
 
-* chalonaRecibidoConsulta(tcNcf, tcRncEmisor [, tcCodigoSeguridad]) -> ChalonaResponse
-*   La factura que un suplidor le emitio a la empresa (ventana de GASTOS).
-*   Busca en lo recibido en Chalona y, si no esta, valida en la DGII. data.origen
-*   dice de donde salio: "chalona_recibidos" (detalle completo con renglones),
-*   "dgii" (SIN DETALLE: solo estado/monto/ITBIS/fechas; exige tcCodigoSeguridad)
-*   o "ninguno". Ver RECIBIDO-CONSULTA.md. Para cursores: goChalonaEcf.RecibidoConsultaACursores(loResp).
+* chalonaRecibidoConsulta(tcNcf, tcRncEmisor [, tcCodigoSeguridad] [, tcCurCab] [, tcCurDet]) -> .T./.F.
+*   La factura que un suplidor le emitio a la empresa (ventana de GASTOS), sin JSON:
+*   deja tcCurCab (def. curRecibidoCab: un registro con encontrado, origen, motivo,
+*   cabecera y totales con nombre DGII: MontoGravadoTotal, TotalITBIS, MontoTotal...)
+*   y tcCurDet (def. curRecibidoDet: un registro por renglon).
+*   origen: "chalona_recibidos" (todo el detalle), "dgii" (SIN DETALLE: estado,
+*   MontoTotal, TotalITBIS; exige tcCodigoSeguridad) o "ninguno".
+*   .F. => goChalonaEcf.RecibidoMensaje (= curRecibidoCab.motivo) dice por que.
+*   Ver RECIBIDO-CONSULTA.md.
 Function chalonaRecibidoConsulta
-  Lparameters tcNcf, tcRncEmisor, tcCodigoSeguridad
+  Lparameters tcNcf, tcRncEmisor, tcCodigoSeguridad, tcCurCab, tcCurDet
   If !_ChalonaLoaderInit()
-    Return _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+    _ChalonaLoaderFail("fox_cliente.script_no_disponible")
+    Return .F.
   Endif
-  Local loResp
-  loResp = goChalonaEcf.RecibidoConsulta(tcNcf, tcRncEmisor, tcCodigoSeguridad)
-  If _ChalonaLoaderEsVersionDesact(loResp)
-    If _ChalonaLoaderDescargar()
-      loResp = goChalonaEcf.RecibidoConsulta(tcNcf, tcRncEmisor, tcCodigoSeguridad)
+  Local llOk
+  llOk = goChalonaEcf.RecibidoConsulta(tcNcf, tcRncEmisor, tcCodigoSeguridad, tcCurCab, tcCurDet)
+  If !llOk And Pemstatus(goChalonaEcf, "RecibidoRespuesta", 5)
+    If _ChalonaLoaderEsVersionDesact(goChalonaEcf.RecibidoRespuesta)
+      If _ChalonaLoaderDescargar()
+        llOk = goChalonaEcf.RecibidoConsulta(tcNcf, tcRncEmisor, tcCodigoSeguridad, tcCurCab, tcCurDet)
+      Endif
     Endif
   Endif
-  Return loResp
+  Return llOk
 Endfunc
 
 * chalonaRecibidoAprobar(tnId) -> ChalonaResponse
