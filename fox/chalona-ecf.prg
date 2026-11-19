@@ -251,7 +251,27 @@ Function _ChalonaEcfFactorStripLinea
   Otherwise
     llExenta = (tnItbisCab = 0)
   Endcase
-  Return Iif(tnIprecio = 1 And tnItbis1 > 0 And !llExenta, 1 + tnItbis1 / 100, 1)
+  If !(tnIprecio = 1 And tnItbis1 > 0 And !llExenta)
+    Return 1
+  Endif
+  * Linea del 16% (ITBIS2): quitar con 1.16, no con 1.18 (Ronald/Vicortiz Administrativo,
+  * 19-nov: E320000000007 daba ecf.itbis_detalle_no_coincide_esperado, bucket 2, ratio 1.18/1.16).
+  * Mismo orden que la clasificacion I1/I2 del builder: con ITBIS por linea manda el
+  * cobrado sobre el precio sin el 16% (16% da 16 exacto; 18% da 17.7 -> 18); sin el,
+  * itbis_tasa.
+  Local lnBrutoL, lnItbisL
+  If tlDetTieneItbis
+    lnBrutoL = _ChalonaEcfNzNum(precio) * _ChalonaEcfNzNum(cantidad)
+    lnItbisL = _ChalonaEcfNzNum(itbis)
+    If lnBrutoL > 0 And lnItbisL > 0 And Round(lnItbisL / (lnBrutoL / 1.16) * 100, 0) = 16
+      Return 1.16
+    Endif
+  Else
+    If lnTasaL = 16
+      Return 1.16
+    Endif
+  Endif
+  Return 1 + tnItbis1 / 100
 Endfunc
 
 Function _ChalonaEcfDescLineaDeriv
