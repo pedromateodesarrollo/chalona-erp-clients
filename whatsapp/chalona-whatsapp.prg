@@ -2,7 +2,7 @@
 * Chalona WhatsApp - cliente Visual FoxPro (VFP 9).
 *
 * Manda WhatsApp desde el numero de la empresa por el API de Chalona
-* (https://whatsapp.chalonasoft.com): texto, y archivos (PDF de una
+* (https://api-mensajes.chalona.app, solo API): texto, y archivos (PDF de una
 * factura, fotos, documentos) con el texto como pie. Consulta el estado de
 * cada envio y lee las respuestas de los clientes.
 *
@@ -36,8 +36,9 @@
 *     Windows y un acento en UTF-8 sale como basura en los mensajes.
 *------------------------------------------------------------
 
-#Define CHALONA_WA_VERSION   "1.1.0"
-#Define CHALONA_WA_URL       "https://whatsapp.chalonasoft.com/api/"
+#Define CHALONA_WA_VERSION   "1.1.1"
+* 2026-11-20: whatsapp.chalonasoft.com se retira; el servicio es api-mensajes.chalona.app.
+#Define CHALONA_WA_URL       "https://api-mensajes.chalona.app/api/"
 * El servidor acepta hasta 16 MB, pero el archivo viaja en base64 dentro de un
 * texto de VFP, que no pasa con seguridad de ~16 millones de caracteres.
 #Define CHALONA_WA_MAX_BYTES 10485760

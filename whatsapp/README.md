@@ -17,16 +17,16 @@ decirlo; si tiene varios y no se dice, el envío se rechaza con
 
 | | |
 |---|---|
-| Servidor | `https://whatsapp.chalonasoft.com/api/` |
+| Servidor | `https://api-mensajes.chalona.app/api/` (solo API; `whatsapp.chalonasoft.com` se retiró el 2026-11-20) |
 | Autenticación | `Authorization: Bearer cst_…` (token de cuenta de servicio) |
 | Cliente FoxPro | [`chalona-whatsapp.prg`](chalona-whatsapp.prg) (VFP 9, un solo archivo, sin dependencias) |
 | Ejemplo | [`ejemplo-whatsapp.prg`](ejemplo-whatsapp.prg) |
 
 ## Antes de empezar
 
-1. **El agente instalado y el número vinculado.** Lo ves en la página
-   `https://whatsapp.chalonasoft.com` (Números: «Listo»), o con `Numeros()` desde
-   Fox.
+1. **El agente instalado y el número vinculado.** Lo ves en la app Android
+   «Chalona WhatsApp» (Números: «Listo»), o con `Numeros()` desde Fox. El
+   agente para Windows: `https://api-mensajes.chalona.app/agente/chalona-whatsapp-agente.exe`.
 2. **Un token de cuenta de servicio** (`cst_…`) de tu empresa, con el perfil
    «Envíos» de WhatsApp. Te lo da tu proveedor. Es una credencial: va en la
    configuración del sistema, nunca en el código ni en un correo.
@@ -184,7 +184,7 @@ o llega una respuesta. Desde Fox lo normal es consultar.
 Es un `POST` con JSON, con el token en la cabecera. El endpoint va en la ruta:
 
 ```bash
-curl https://whatsapp.chalonasoft.com/api/whatsapp_enviar \
+curl https://api-mensajes.chalona.app/api/whatsapp_enviar \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"a":"18095551234","texto":"Su factura FT-000123","control":"FT-000123",
        "archivo":{"nombre":"FT-000123.pdf","mime":"application/pdf","data":"<base64>"},
