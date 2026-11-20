@@ -338,10 +338,22 @@ Function _ChalonaEcfDescuentoLinea
   * tlDescLinea lo decide el builder en el pre-scan y SOLO es .T. si la suma de
   * los descuentos de linea cuadra con imtr.descuento. Un cursor de integrador
   * que no llene la columna suma 0, no cuadra, y cae al reparto de siempre.
-  Local lnDescProp, lnD
+  Local lnDescProp, lnD, lnDL
   * Alias explicito: curChalMae tambien tiene campo descuento (el de cabecera).
   If tlDescLinea And Type("curChalDet.descuento") # "U"
-    Return Round(_ChalonaEcfNzNum(curChalDet.descuento) * tnTasaFactor, 2)
+    lnDL = Round(_ChalonaEcfNzNum(curChalDet.descuento) * tnTasaFactor, 2)
+    * Si el ITBIS cobrado de la linea no sale de (bruto - descuento de linea), el
+    * ERP aplico OTRO descuento al cobrar: el ITBIS manda y la base sale de el
+    * (Vicortiz Administrativo, CHAO E320000176234, 20-nov: descuento de linea
+    * 247.46 pero base cobrada 2,225; total impreso 4,314.49, armado 4,368.62).
+    * Si cuadra (TOLEDO), el derivado da el mismo descuento y no cambia nada.
+    If lnDL > 0
+      lnD = _ChalonaEcfDescLineaDeriv(tnBruto, lnDL, tnTasaFactor, tlDetTieneItbis)
+      If lnD >= 0 And Abs(lnD - lnDL) > 0.05
+        Return lnD
+      Endif
+    Endif
+    Return lnDL
   Endif
   If tnDescMae = 0 Or tnTotalBruto = 0
     Return 0
